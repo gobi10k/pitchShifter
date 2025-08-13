@@ -10,6 +10,7 @@
 
 #include <JuceHeader.h>
 #include "PitchShifter.h"
+#include <juce_dsp/juce_dsp.h>
 
 //==============================================================================
 /**
@@ -60,8 +61,8 @@ private:
     juce::AudioProcessorValueTreeState apvts;
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    std::vector<PitchShifter> pitchShifters;
-    std::vector<juce::LinearSmoothedValue<float>> smoothedPitch;
+    juce::OwnedArray<PitchShifter> pitchShifters;
+    juce::OwnedArray<juce::LinearSmoothedValue<float>> smoothedPitch;
     float lastGlide = -1.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PitchShifterAudioProcessor)

@@ -103,12 +103,16 @@ void PitchShifterAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     spec.maximumBlockSize = samplesPerBlock;
     spec.numChannels = getTotalNumOutputChannels();
 
-    pitchShifters.resize(spec.numChannels);
-    smoothedPitch.resize(spec.numChannels);
+    pitchShifters.clear();
+    smoothedPitch.clear();
+
     for (int i = 0; i < spec.numChannels; ++i)
     {
-        pitchShifters[i].prepareToPlay(sampleRate, samplesPerBlock);
-        smoothedPitch[i].reset(sampleRate, 0.05); // 50ms default glide
+        pitchShifters.add(new PitchShifter());
+        pitchShifters[i]->prepareToPlay(sampleRate, samplesPerBlock);
+
+        smoothedPitch.add(new juce::LinearSmoothedValue<float>());
+        smoothedPitch[i]->reset(sampleRate, 0.05); // 50ms default glide
     }
 }
 
@@ -167,17 +171,17 @@ void PitchShifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         for (int channel = 0; channel < totalNumInputChannels; ++channel)
         {
             float rampLength = glide > 0.0f ? glide / 1000.0f : 0.0f;
-            smoothedPitch[channel].reset(getSampleRate(), rampLength);
+            smoothedPitch[channel]->reset(getSampleRate(), rampLength);
         }
         lastGlide = glide;
     }
 
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        smoothedPitch[channel].setTargetValue(pitch);
+        smoothedPitch[channel]->setTargetValue(pitch);
         auto* channelData = buffer.getWritePointer (channel);
         juce::AudioBuffer<float> channelBuffer( &channelData, 1, buffer.getNumSamples());
-        pitchShifters[channel].process(channelBuffer, &smoothedPitch[channel]);
+        pitchShifters[channel]->process(channelBuffer, smoothedPitch[channel]);
     }
 }
 
