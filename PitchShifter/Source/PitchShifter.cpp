@@ -322,9 +322,11 @@ void PitchShifter::processPhases(std::complex<float>* fftData, float pitchShiftR
             // Linear interpolation for magnitude.
             float newMag = mag1 * (1.0f - fraction) + mag2 * fraction;
 
-            // Simple linear interpolation for phase. This is a simplification and doesn't account for phase wrapping,
-            // but is a significant improvement over the previous implementation.
-            float newPhase = phase1 * (1.0f - fraction) + phase2 * fraction;
+            // Correctly interpolate phase by finding the shortest path around the circle.
+            float phaseDelta = phase2 - phase1;
+            while (phaseDelta > PI) phaseDelta -= TWO_PI;
+            while (phaseDelta < -PI) phaseDelta += TWO_PI;
+            float newPhase = phase1 + phaseDelta * fraction;
             
             // Reconstruct the complex number and place it in the destination bin.
             fftData[targetBin] = std::polar(newMag, newPhase);
