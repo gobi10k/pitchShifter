@@ -290,41 +290,50 @@ void PitchShifter::performISTFT(const std::complex<float>* fftData, float* outpu
 void PitchShifter::processPhases(std::complex<float>* fftData, float pitchShiftRatio)
 {
     const int spectrumSize = fftSize / 2 + 1;
-    
-    // Simple frequency-domain pitch shifting that WORKS
-    std::vector<std::complex<float>> shiftedSpectrum(spectrumSize);
-    std::fill(shiftedSpectrum.begin(), shiftedSpectrum.end(), std::complex<float>(0.0f, 0.0f));
-    
-    // Keep DC component
-    shiftedSpectrum[0] = fftData[0];
-    
-    // Simple bin shifting - this guarantees output
-    for (int i = 1; i < spectrumSize; ++i)
-    {
-        float targetBin = i * pitchShiftRatio;
-        
-        if (targetBin >= 1.0f && targetBin < spectrumSize - 1)
-        {
-            int bin1 = (int)targetBin;
-            int bin2 = bin1 + 1;
-            float frac = targetBin - bin1;
-            
-            // Simple linear interpolation
-            if (bin1 < spectrumSize)
-            {
-                shiftedSpectrum[bin1] += fftData[i] * (1.0f - frac);
-            }
-            if (bin2 < spectrumSize)
-            {
-                shiftedSpectrum[bin2] += fftData[i] * frac;
-            }
-        }
-    }
-    
-    // Copy back
+
+    // Create a temporary copy of the original spectrum data, as we'll be reading from it while writing to fftData.
+    std::vector<std::complex<float>> originalSpectrum(spectrumSize);
     for (int i = 0; i < spectrumSize; ++i)
     {
-        fftData[i] = shiftedSpectrum[i];
+        originalSpectrum[i] = fftData[i];
+    }
+
+    // Clear the output spectrum (fftData), except for the DC and Nyquist bins which we will not modify.
+    std::fill(fftData + 1, fftData + spectrumSize - 1, std::complex<float>(0.0f, 0.0f));
+
+    // Iterate through the destination bins ("pull" resampling) to prevent energy loss.
+    for (int targetBin = 1; targetBin < spectrumSize - 1; ++targetBin)
+    {
+        float sourceBinFloat = (float)targetBin / pitchShiftRatio;
+
+        // Check if the source bin is within the valid range of the original spectrum.
+        if (sourceBinFloat >= 0.0f && sourceBinFloat < (float)spectrumSize - 1.0f)
+        {
+            int sourceBin1 = static_cast<int>(sourceBinFloat);
+            int sourceBin2 = sourceBin1 + 1;
+            float fraction = sourceBinFloat - sourceBin1;
+
+            // Get magnitudes and phases from the original spectrum for interpolation.
+            float mag1 = std::abs(originalSpectrum[sourceBin1]);
+            float mag2 = std::abs(originalSpectrum[sourceBin2]);
+            float phase1 = std::arg(originalSpectrum[sourceBin1]);
+            float phase2 = std::arg(originalSpectrum[sourceBin2]);
+
+            // Linear interpolation for magnitude.
+            float newMag = mag1 * (1.0f - fraction) + mag2 * fraction;
+
+            // Simple linear interpolation for phase. This is a simplification and doesn't account for phase wrapping,
+            // but is a significant improvement over the previous implementation.
+            float newPhase = phase1 * (1.0f - fraction) + phase2 * fraction;
+            
+            // Reconstruct the complex number and place it in the destination bin.
+            fftData[targetBin] = std::polar(newMag, newPhase);
+        }
+    }
+
+    // Update the separate 'magnitudes' vector as it's used by other processing steps (e.g., formant preservation).
+    for (int i = 0; i < spectrumSize; ++i)
+    {
         magnitudes[i] = std::abs(fftData[i]);
     }
 }
