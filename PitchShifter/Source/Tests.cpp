@@ -22,14 +22,19 @@ public:
 
         PitchShifter shifter;
         const double sampleRate = 44100.0;
-        const int blockSize = 512;
+        const int blockSize = 1024; // Use a larger block size for more harmonics
         shifter.prepareToPlay(sampleRate, blockSize);
 
-        // Create a sine wave at 440 Hz
+        // Create a sawtooth wave at 220 Hz
         juce::AudioBuffer<float> buffer(1, blockSize);
+        float phase = 0.0f;
+        float increment = 2.0f * juce::MathConstants<float>::pi * 220.0f / (float)sampleRate;
         for (int i = 0; i < blockSize; ++i)
         {
-            buffer.setSample(0, i, std::sin(2.0 * juce::MathConstants<double>::pi * 440.0 * i / sampleRate));
+            buffer.setSample(0, i, phase / juce::MathConstants<float>::pi - 1.0f);
+            phase += increment;
+            if (phase >= juce::MathConstants<float>::pi)
+                phase -= 2.0f * juce::MathConstants<float>::pi;
         }
 
         // Process with a pitch shift of +12 semitones (up one octave)
@@ -38,9 +43,7 @@ public:
         smoother.setTargetValue(12.0f);
         shifter.process(buffer, &smoother);
 
-        // Analyze the output to see if the pitch is now 880 Hz
-        // This is a simplified analysis. A more robust test would use a more
-        // sophisticated method to find the fundamental frequency.
+        // Analyze the output to see if the pitch is now 440 Hz
         juce::dsp::FFT fft(2048);
         juce::AudioBuffer<float> fftBuffer(1, 2048 * 2);
         fftBuffer.clear();
@@ -62,7 +65,7 @@ public:
         }
 
         float frequency = (float)maxIndex * (float)sampleRate / 2048.0f;
-        expectWithinAbsoluteError(frequency, 880.0f, 50.0f); // Allow some error
+        expectWithinAbsoluteError(frequency, 440.0f, 50.0f); // Allow some error
     }
 };
 

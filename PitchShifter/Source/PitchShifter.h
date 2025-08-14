@@ -23,6 +23,7 @@ public:
 
 private:
     void processFrame(float pitchShiftRatio);
+    void findPeaks(std::vector<int>& peakLocations, const float* magnitudes, int numMagnitudes);
     //==============================================================================
     // STFT variables
     int fftSize;
@@ -42,6 +43,8 @@ private:
     int inputBufferPos;
     int outputBufferPos;
     int samplesInInputBuffer;
+
+    std::vector<int> peakLocations;
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PitchShifter)

@@ -14,9 +14,8 @@
 // pitch shifter, more advanced techniques could be used to mitigate artifacts,
 // such as:
 // - Transient detection and preservation to avoid smearing of percussive sounds.
-// - Phase locking to reduce phasiness in the output.
 // - More sophisticated overlap-add techniques.
-// However, this implementation serves as a good starting point.
+// This implementation now includes a simple phase-locking mechanism to improve quality.
 
 PitchShifter::PitchShifter() : fftSize(2048), hopSize(512), fft(fftSize), window(fftSize, juce::dsp::WindowingFunction<float>::hann)
 {
@@ -82,6 +81,19 @@ void PitchShifter::process(juce::AudioBuffer<float>& buffer, juce::LinearSmoothe
     }
 }
 
+void PitchShifter::findPeaks(std::vector<int>& peakLocations, const float* magnitudes, int numMagnitudes)
+{
+    peakLocations.clear();
+    for (int i = 1; i < numMagnitudes - 1; ++i)
+    {
+        if (magnitudes[i] > magnitudes[i - 1] && magnitudes[i] > magnitudes[i + 1])
+        {
+            peakLocations.push_back(i);
+        }
+    }
+}
+
+
 void PitchShifter::processFrame(float pitchShiftRatio)
 {
     // Copy input buffer to a temporary buffer for windowing
@@ -107,28 +119,81 @@ void PitchShifter::processFrame(float pitchShiftRatio)
                 reinterpret_cast<juce::dsp::Complex<float>*>(fftBuffer.getWritePointer(0)),
                 false);
 
+    // Get magnitudes and find peaks
+    juce::AudioBuffer<float> magnitudes(1, fftSize / 2 + 1);
+    juce::AudioBuffer<float> phases(1, fftSize / 2 + 1);
     for (int i = 0; i < fftSize / 2 + 1; ++i)
     {
-        // Get magnitude and phase
-        float magnitude = std::abs(std::complex<float>(fftBuffer.getSample(0, i * 2), fftBuffer.getSample(0, i * 2 + 1)));
-        float phase = std::arg(std::complex<float>(fftBuffer.getSample(0, i * 2), fftBuffer.getSample(0, i * 2 + 1)));
+        float real = fftBuffer.getSample(0, i * 2);
+        float imag = fftBuffer.getSample(0, i * 2 + 1);
+        magnitudes.setSample(0, i, std::sqrt(real * real + imag * imag));
+        phases.setSample(0, i, std::atan2(imag, real));
+    }
+    findPeaks(peakLocations, magnitudes.getReadPointer(0), magnitudes.getNumSamples());
 
-        // Calculate phase difference
+    // Process phases
+    for (int i = 0; i < fftSize / 2 + 1; ++i)
+    {
+        float phase = phases.getSample(0, i);
         float phaseDifference = phase - lastInputPhase.getSample(0, i);
         lastInputPhase.setSample(0, i, phase);
 
-        // Calculate frequency deviation
         float freqDev = phaseDifference - (float)i * 2.0f * juce::MathConstants<float>::pi * (float)hopSize / (float)fftSize;
         freqDev = fmod(freqDev + juce::MathConstants<float>::pi, 2.0f * juce::MathConstants<float>::pi) - juce::MathConstants<float>::pi;
 
-        // Calculate true frequency
-        float trueFreq = (float)i * 2.0f * juce::MathConstants<float>::pi / (float)fftSize + freqDev / (float)hopSize;
+        // Phase locking for bins around peaks
+        bool isPeak = false;
+        for (int peak : peakLocations)
+        {
+            if (i == peak)
+            {
+                isPeak = true;
+                break;
+            }
+        }
 
-        // Calculate new phase
-        float newPhase = lastOutputPhase.getSample(0, i) + trueFreq * (float)hopSize * pitchShiftRatio;
+        float newPhase;
+        if (isPeak)
+        {
+            float trueFreq = (float)i * 2.0f * juce::MathConstants<float>::pi / (float)fftSize + freqDev / (float)hopSize;
+            newPhase = lastOutputPhase.getSample(0, i) + trueFreq * (float)hopSize * pitchShiftRatio;
+        }
+        else
+        {
+            // Find nearest peak
+            int nearestPeak = -1;
+            float minDistance = 100000.0f;
+            for (int peak : peakLocations)
+            {
+                float distance = std::abs((float)i - (float)peak);
+                if (distance < minDistance)
+                {
+                    minDistance = distance;
+                    nearestPeak = peak;
+                }
+            }
+
+            if (nearestPeak != -1)
+            {
+                float peakPhase = phases.getSample(0, nearestPeak);
+                float peakPhaseDifference = peakPhase - lastInputPhase.getSample(0, nearestPeak);
+                float peakFreqDev = peakPhaseDifference - (float)nearestPeak * 2.0f * juce::MathConstants<float>::pi * (float)hopSize / (float)fftSize;
+                peakFreqDev = fmod(peakFreqDev + juce::MathConstants<float>::pi, 2.0f * juce::MathConstants<float>::pi) - juce::MathConstants<float>::pi;
+                float peakTrueFreq = (float)nearestPeak * 2.0f * juce::MathConstants<float>::pi / (float)fftSize + peakFreqDev / (float)hopSize;
+                newPhase = lastOutputPhase.getSample(0, nearestPeak) + peakTrueFreq * (float)hopSize * pitchShiftRatio + (phase - peakPhase);
+            }
+            else
+            {
+                // No peak found, use original method
+                float trueFreq = (float)i * 2.0f * juce::MathConstants<float>::pi / (float)fftSize + freqDev / (float)hopSize;
+                newPhase = lastOutputPhase.getSample(0, i) + trueFreq * (float)hopSize * pitchShiftRatio;
+            }
+        }
+
         lastOutputPhase.setSample(0, i, newPhase);
 
         // Convert back to complex
+        float magnitude = magnitudes.getSample(0, i);
         std::complex<float> newComplex = std::polar(magnitude, newPhase);
         fftBuffer.setSample(0, i * 2, newComplex.real());
         fftBuffer.setSample(0, i * 2 + 1, newComplex.imag());
