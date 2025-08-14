@@ -42,7 +42,7 @@ private:
     void propagatePhase(std::complex<float>* fftData, const std::vector<int>& peaks, float pitchShiftRatio);
     
     // Improved formant preservation
-    void preserveFormants(std::complex<float>* fftData, float pitchShiftRatio);
+    void preserveFormants(std::complex<float>* fftData, float pitchShiftRatio, const std::vector<float>& originalMags);
     void estimateSpectralEnvelope(const float* magnitudes, float* envelope);
     void applySpectralEnvelope(std::complex<float>* fftData, const float* envelope);
     

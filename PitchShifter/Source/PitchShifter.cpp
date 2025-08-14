@@ -212,13 +212,17 @@ void PitchShifter::processFrame(float pitchShiftRatio)
     // Perform forward STFT with windowed data
     performSTFT(frameData.data(), fftData.data());
     
+    // Make a copy of the original magnitudes for formant preservation
+    const std::vector<float> originalMagnitudes = magnitudes;
+
     // Process phases with enhanced coherence
     processPhases(fftData.data(), pitchShiftRatio);
     
     // Apply formant preservation if enabled
     if (formantPreservationEnabled)
     {
-        preserveFormants(fftData.data(), pitchShiftRatio);
+        // Pass original magnitudes to preserve the correct envelope
+        preserveFormants(fftData.data(), pitchShiftRatio, originalMagnitudes);
     }
     
     // Perform inverse STFT
@@ -361,19 +365,19 @@ float PitchShifter::detectTransient(const std::vector<float>& currentMags)
     return spectralFlux;
 }
 
-void PitchShifter::preserveFormants(std::complex<float>* fftData, float pitchShiftRatio)
+void PitchShifter::preserveFormants(std::complex<float>* fftData, float pitchShiftRatio, const std::vector<float>& originalMags)
 {
     if (std::abs(pitchShiftRatio - 1.0f) < 0.01f) return; // No processing needed for small shifts
     
     const int spectrumSize = fftSize / 2 + 1;
     std::vector<float> envelope(spectrumSize);
     
-    // Simple but effective envelope extraction
-    for (int i = 1; i < spectrumSize-1; i++)
+    // Simple but effective envelope extraction from the ORIGINAL spectrum
+    for (int i = 1; i < spectrumSize - 1; i++)
     {
         // Moving average with peak hold
-        envelope[i] = 0.5f * (magnitudes[i-1] + magnitudes[i+1]);
-        envelope[i] = std::max(envelope[i], magnitudes[i] * 0.8f);
+        envelope[i] = 0.5f * (originalMags[i - 1] + originalMags[i + 1]);
+        envelope[i] = std::max(envelope[i], originalMags[i] * 0.8f);
     }
     
     // Apply multiple smoothing passes
