@@ -88,16 +88,28 @@ void PitchShifter::process(juce::AudioBuffer<float>& buffer, juce::LinearSmoothe
 
 void PitchShifter::processFrame(float pitchShiftRatio)
 {
-    // Copy input buffer to FFT buffer and apply window
+    // Copy input buffer to a temporary buffer for windowing
+    juce::AudioBuffer<float> windowedInput(1, fftSize);
     for (int i = 0; i < fftSize; ++i)
     {
         int circularBufferIndex = (inputBufferPos + i) % fftSize;
-        fftBuffer.setSample(0, i * 2, inputBuffer.getSample(0, circularBufferIndex) * window.getSample(i));
+        windowedInput.setSample(0, i, inputBuffer.getSample(0, circularBufferIndex));
+    }
+
+    // Apply window
+    window.multiplyWithWindowingTable(windowedInput.getWritePointer(0), fftSize);
+
+    // Copy to complex buffer for FFT
+    for (int i = 0; i < fftSize; ++i)
+    {
+        fftBuffer.setSample(0, i * 2, windowedInput.getSample(0, i));
         fftBuffer.setSample(0, i * 2 + 1, 0.0f);
     }
 
     // Perform FFT
-    fft.perform(fftBuffer.getWritePointer(0), fftBuffer.getWritePointer(0), false);
+    fft.perform(reinterpret_cast<const juce::dsp::Complex<float>*>(fftBuffer.getReadPointer(0)),
+                reinterpret_cast<juce::dsp::Complex<float>*>(fftBuffer.getWritePointer(0)),
+                false);
 
     for (int i = 0; i < fftSize / 2 + 1; ++i)
     {
@@ -127,12 +139,22 @@ void PitchShifter::processFrame(float pitchShiftRatio)
     }
 
     // Perform inverse FFT
-    fft.perform(fftBuffer.getWritePointer(0), fftBuffer.getWritePointer(0), true);
+    fft.perform(reinterpret_cast<const juce::dsp::Complex<float>*>(fftBuffer.getReadPointer(0)),
+                reinterpret_cast<juce::dsp::Complex<float>*>(fftBuffer.getWritePointer(0)),
+                true);
+
+    // Apply window to IFFT output
+    juce::AudioBuffer<float> windowedOutput(1, fftSize);
+     for (int i = 0; i < fftSize; ++i)
+    {
+        windowedOutput.setSample(0, i, fftBuffer.getSample(0, i * 2));
+    }
+    window.multiplyWithWindowingTable(windowedOutput.getWritePointer(0), fftSize);
 
     // Overlap-add to output buffer
     for (int i = 0; i < fftSize; ++i)
     {
         int circularBufferIndex = (outputBufferPos + i) % fftSize;
-        outputBuffer.addSample(0, circularBufferIndex, fftBuffer.getSample(0, i * 2) * window.getSample(i));
+        outputBuffer.addSample(0, circularBufferIndex, windowedOutput.getSample(0, i));
     }
 }
