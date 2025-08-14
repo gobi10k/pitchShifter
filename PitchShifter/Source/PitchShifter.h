@@ -13,6 +13,7 @@
 #include <JuceHeader.h>
 #include <vector>
 #include <complex>
+#include <juce_dsp/juce_dsp.h>
 
 class PitchShifter
 {
@@ -93,6 +94,9 @@ private:
     int inputBufferPos;
     int outputBufferPos;
     int samplesInInputBuffer;
+
+    // Dry signal delay line
+    juce::dsp::DelayLine<float> dryDelay;
     
     // Constants
     static constexpr float PI = juce::MathConstants<float>::pi;

@@ -105,6 +105,12 @@ void PitchShifter::prepareToPlay(double newSampleRate, int samplesPerBlock)
     samplesInInputBuffer = 0;
     lastSpectralFlux = 0.0f;
     isTransientFrame = false;
+
+    // Prepare dry delay line
+    juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32)samplesPerBlock, 1 };
+    dryDelay.prepare(spec);
+    dryDelay.setDelay(fftSize);
+    dryDelay.reset();
 }
 
 void PitchShifter::setQuality(int quality)
@@ -147,8 +153,12 @@ void PitchShifter::process(juce::AudioBuffer<float>& buffer, juce::LinearSmoothe
             outputBuffer.setSample(0, outputBufferPos, 0.0f); // Clear for next cycle
             outputBufferPos = (outputBufferPos + 1) % outputBuffer.getNumSamples();
             
+            // Get delayed dry sample
+            float drySample = dryDelay.popSample(0);
+            dryDelay.pushSample(0, channelData[i]);
+
             // Mix dry/wet and apply gain
-            channelData[i] = (channelData[i] * (1.0f - mix) + wetSample * mix) * outputGain;
+            channelData[i] = (drySample * (1.0f - mix) + wetSample * mix) * outputGain;
         }
     }
 }
@@ -173,7 +183,7 @@ void PitchShifter::processFrame(float pitchShiftRatio)
         applyWindow(frameData.data(), fftSize);
         
         // Direct overlap-add
-        float overlapGain = 1.0f / (overlap * 2.0f);
+        float overlapGain = 2.0f / overlap;
         for (int i = 0; i < fftSize; ++i)
         {
             int writePos = (outputBufferPos + i) % outputBuffer.getNumSamples();
@@ -216,7 +226,7 @@ void PitchShifter::processFrame(float pitchShiftRatio)
     performISTFT(fftData.data(), outputFrame.data());
     
     // Overlap-add with proper windowing and normalization
-    float overlapGain = 1.0f / overlap; // Better normalization
+    float overlapGain = 2.0f / overlap; // Consistent normalization
     for (int i = 0; i < fftSize; ++i)
     {
         int writePos = (outputBufferPos + i) % outputBuffer.getNumSamples();
