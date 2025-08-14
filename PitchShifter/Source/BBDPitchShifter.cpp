@@ -81,8 +81,8 @@ void BBDPitchShifter::process(juce::AudioBuffer<float>& buffer, float pitchRatio
         float sampleB2 = delayBuffer.getSample(0, readPosB2);
         float sampleB = (sampleB1 * (1.0f - fracB) + sampleB2 * fracB) * gainB;
 
-        // 4. Sum the crossfaded signals
-        float outputSample = sampleA + sampleB;
+        // 4. Sum the crossfaded signals and normalize
+        float outputSample = (sampleA + sampleB) * 0.5f;
 
         // 5. Apply BBD-style low-pass filter
         float cutoff = 10000.0f / pitchRatio;

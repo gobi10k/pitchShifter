@@ -32,24 +32,18 @@ private:
     // Controls
     juce::Slider pitchSlider;
     juce::Slider glideSlider;
-    juce::ComboBox qualityComboBox;
-    juce::ToggleButton formantToggle;
     juce::Slider mixSlider;
     juce::Slider outputGainSlider;
     
     // Labels
     juce::Label pitchLabel;
     juce::Label glideLabel;
-    juce::Label qualityLabel;
-    juce::Label formantLabel;
     juce::Label mixLabel;
     juce::Label outputGainLabel;
 
     // Attachments
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> pitchAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> glideAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> qualityAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> formantAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> mixAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> outputGainAttachment;
 
