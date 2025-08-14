@@ -11,8 +11,8 @@
       <FILE id="D1dxaa" name="PluginEditor.cpp" compile="1" resource="0"
             file="Source/PluginEditor.cpp"/>
       <FILE id="wLzZAJ" name="PluginEditor.h" compile="0" resource="0" file="Source/PluginEditor.h"/>
-      <FILE id="PitchShifterH" name="PitchShifter.h" compile="0" resource="0" file="Source/PitchShifter.h"/>
-      <FILE id="PitchShifterCPP" name="PitchShifter.cpp" compile="1" resource="0" file="Source/PitchShifter.cpp"/>
+      <FILE id="BBDPitchShifterH" name="BBDPitchShifter.h" compile="0" resource="0" file="Source/BBDPitchShifter.h"/>
+      <FILE id="BBDPitchShifterCPP" name="BBDPitchShifter.cpp" compile="1" resource="0" file="Source/BBDPitchShifter.cpp"/>
       <FILE id="TestsCPP" name="Tests.cpp" compile="1" resource="0" file="Source/Tests.cpp"/>
     </GROUP>
   </MAINGROUP>
