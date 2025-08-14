@@ -113,24 +113,29 @@ void PitchShifterAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     spec.maximumBlockSize = samplesPerBlock;
     spec.numChannels = getTotalNumOutputChannels();
 
-    pitchShifters.clear();
-    smoothedPitch.clear();
+    dryShifters.clear();
+    wetShifters.clear();
+    smoothedWetPitch.clear();
 
     for (int i = 0; i < spec.numChannels; ++i)
     {
-        pitchShifters.add(new PitchShifter());
-        
-        // Set quality BEFORE prepareToPlay for proper initialization
+        // Initialize Dry Shifter (for 0-shift processing)
+        dryShifters.add(new PitchShifter());
         int quality = (int)*apvts.getRawParameterValue("QUALITY");
-        pitchShifters[i]->setQuality(quality);
-        pitchShifters[i]->setFormantPreservation(*apvts.getRawParameterValue("FORMANT_PRESERVATION") > 0.5f);
-        
-        // Now prepare with the correct settings
-        pitchShifters[i]->prepareToPlay(sampleRate, samplesPerBlock);
+        dryShifters[i]->setQuality(quality);
+        dryShifters[i]->setFormantPreservation(*apvts.getRawParameterValue("FORMANT_PRESERVATION") > 0.5f);
+        dryShifters[i]->prepareToPlay(sampleRate, samplesPerBlock);
 
-        smoothedPitch.add(new juce::LinearSmoothedValue<float>());
+        // Initialize Wet Shifter (for variable pitch processing)
+        wetShifters.add(new PitchShifter());
+        wetShifters[i]->setQuality(quality);
+        wetShifters[i]->setFormantPreservation(*apvts.getRawParameterValue("FORMANT_PRESERVATION") > 0.5f);
+        wetShifters[i]->prepareToPlay(sampleRate, samplesPerBlock);
+
+        // Smoother for the wet path pitch
+        smoothedWetPitch.add(new juce::LinearSmoothedValue<float>());
         float glideTime = *apvts.getRawParameterValue("GLIDE") / 1000.0f;
-        smoothedPitch[i]->reset(sampleRate, glideTime > 0.0f ? glideTime : 0.001f);
+        smoothedWetPitch[i]->reset(sampleRate, glideTime > 0.0f ? glideTime : 0.001f);
     }
     
     // Initialize parameter tracking
@@ -196,20 +201,23 @@ void PitchShifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         for (int channel = 0; channel < totalNumInputChannels; ++channel)
         {
             float rampLength = glide > 0.0f ? glide / 1000.0f : 0.001f;
-            smoothedPitch[channel]->reset(getSampleRate(), rampLength);
+            smoothedWetPitch[channel]->reset(getSampleRate(), rampLength);
         }
         lastGlide = glide;
     }
     
-    // Update quality if changed - requires re-initialization
+    // Update quality if changed - requires re-initialization for all shifters
     if (quality != lastQuality)
     {
         for (int channel = 0; channel < totalNumInputChannels; ++channel)
         {
-            pitchShifters[channel]->setQuality(quality);
-            // Re-initialize with new quality settings
-            pitchShifters[channel]->prepareToPlay(getSampleRate(), buffer.getNumSamples());
-            pitchShifters[channel]->setFormantPreservation(formantPreservation);
+            dryShifters[channel]->setQuality(quality);
+            dryShifters[channel]->prepareToPlay(getSampleRate(), buffer.getNumSamples());
+            dryShifters[channel]->setFormantPreservation(formantPreservation);
+
+            wetShifters[channel]->setQuality(quality);
+            wetShifters[channel]->prepareToPlay(getSampleRate(), buffer.getNumSamples());
+            wetShifters[channel]->setFormantPreservation(formantPreservation);
         }
         lastQuality = quality;
     }
@@ -219,21 +227,56 @@ void PitchShifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     {
         for (int channel = 0; channel < totalNumInputChannels; ++channel)
         {
-            pitchShifters[channel]->setFormantPreservation(formantPreservation);
+            dryShifters[channel]->setFormantPreservation(formantPreservation);
+            wetShifters[channel]->setFormantPreservation(formantPreservation);
         }
         lastFormantPreservation = formantPreservation;
     }
 
-    // Process each channel
+    // Set target pitch for the wet path
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        smoothedPitch[channel]->setTargetValue(pitch);
-        
-        // Create a single-channel buffer for processing
-        auto* channelData = buffer.getWritePointer(channel);
-        juce::AudioBuffer<float> channelBuffer(&channelData, 1, buffer.getNumSamples());
-        
-        pitchShifters[channel]->process(channelBuffer, smoothedPitch[channel], mix, outputGain);
+        smoothedWetPitch[channel]->setTargetValue(pitch);
+    }
+
+    // Create copies of the buffer for parallel processing
+    juce::AudioBuffer<float> dryBuffer(buffer);
+    juce::AudioBuffer<float> wetBuffer(buffer);
+
+    // Process each channel in parallel
+    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    {
+        // 1. Process Dry Path (0 pitch shift)
+        auto* dryChannelData = dryBuffer.getWritePointer(channel);
+        juce::AudioBuffer<float> dryChannelBuffer(&dryChannelData, 1, dryBuffer.getNumSamples());
+        juce::LinearSmoothedValue<float> drySmoother;
+        drySmoother.setCurrentAndTargetValue(0.0f); // Hardcoded 0 shift
+        dryShifters[channel]->process(dryChannelBuffer, &drySmoother);
+
+        // 2. Process Wet Path (UI-controlled pitch shift)
+        auto* wetChannelData = wetBuffer.getWritePointer(channel);
+        juce::AudioBuffer<float> wetChannelBuffer(&wetChannelData, 1, wetBuffer.getNumSamples());
+        wetShifters[channel]->process(wetChannelBuffer, smoothedWetPitch[channel]);
+    }
+
+    // 3. Mix the parallel signals
+    const float wetGainBoost = 1.41f; // ~3dB boost for the wet signal
+    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    {
+        auto* outputData = buffer.getWritePointer(channel);
+        const auto* dryData = dryBuffer.getReadPointer(channel);
+        const auto* wetData = wetBuffer.getReadPointer(channel);
+
+        // Using an equal-power crossfade for a smoother blend
+        const float dryMix = std::cos(mix * juce::MathConstants<float>::pi * 0.5f);
+        const float wetMix = std::sin(mix * juce::MathConstants<float>::pi * 0.5f);
+
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+        {
+            float drySample = dryData[sample];
+            float wetSample = wetData[sample] * wetGainBoost;
+            outputData[sample] = (drySample * dryMix + wetSample * wetMix) * outputGain;
+        }
     }
 }
 

@@ -62,8 +62,9 @@ private:
     juce::AudioProcessorValueTreeState apvts;
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    juce::OwnedArray<PitchShifter> pitchShifters;
-    juce::OwnedArray<juce::LinearSmoothedValue<float>> smoothedPitch;
+    juce::OwnedArray<PitchShifter> dryShifters;
+    juce::OwnedArray<PitchShifter> wetShifters;
+    juce::OwnedArray<juce::LinearSmoothedValue<float>> smoothedWetPitch;
     
     // Parameter tracking for updates
     float lastGlide = -1.0f;

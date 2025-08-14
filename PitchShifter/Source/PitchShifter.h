@@ -13,7 +13,6 @@
 #include <JuceHeader.h>
 #include <vector>
 #include <complex>
-#include <juce_dsp/juce_dsp.h>
 
 class PitchShifter
 {
@@ -22,7 +21,7 @@ public:
     ~PitchShifter();
 
     void prepareToPlay(double sampleRate, int samplesPerBlock);
-    void process(juce::AudioBuffer<float>& buffer, juce::LinearSmoothedValue<float>* smoother, float mix, float outputGain);
+    void process(juce::AudioBuffer<float>& buffer, juce::LinearSmoothedValue<float>* smoother);
     
     // Quality settings
     void setQuality(int quality); // 0=fast, 1=balanced, 2=high
@@ -94,9 +93,6 @@ private:
     int inputBufferPos;
     int outputBufferPos;
     int samplesInInputBuffer;
-
-    // Dry signal delay line
-    juce::dsp::DelayLine<float> dryDelay;
     
     // Constants
     static constexpr float PI = juce::MathConstants<float>::pi;

@@ -106,11 +106,6 @@ void PitchShifter::prepareToPlay(double newSampleRate, int samplesPerBlock)
     lastSpectralFlux = 0.0f;
     isTransientFrame = false;
 
-    // Prepare dry delay line
-    juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32)samplesPerBlock, 1 };
-    dryDelay.prepare(spec);
-    dryDelay.setDelay(fftSize);
-    dryDelay.reset();
 }
 
 void PitchShifter::setQuality(int quality)
@@ -124,42 +119,33 @@ void PitchShifter::setFormantPreservation(bool enabled)
     formantPreservationEnabled = enabled;
 }
 
-void PitchShifter::process(juce::AudioBuffer<float>& buffer, juce::LinearSmoothedValue<float>* smoother, float mix, float outputGain)
+void PitchShifter::process(juce::AudioBuffer<float>& buffer, juce::LinearSmoothedValue<float>* smoother)
 {
     const int numSamples = buffer.getNumSamples();
-    
-    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
-    {
-        auto* channelData = buffer.getWritePointer(channel);
-        
-        // Store input samples
-        for (int i = 0; i < numSamples; ++i)
-        {
-            inputBuffer.setSample(0, inputBufferPos, channelData[i]);
-            inputBufferPos = (inputBufferPos + 1) % inputBuffer.getNumSamples();
-            samplesInInputBuffer++;
-            
-            // Process when we have enough samples
-            if (samplesInInputBuffer >= hopSize)
-            {
-                float pitchShift = smoother->getNextValue();
-                float pitchShiftRatio = std::pow(2.0f, pitchShift / 12.0f);
-                processFrame(pitchShiftRatio);
-                samplesInInputBuffer -= hopSize;
-            }
-            
-            // Get output sample
-            float wetSample = outputBuffer.getSample(0, outputBufferPos);
-            outputBuffer.setSample(0, outputBufferPos, 0.0f); // Clear for next cycle
-            outputBufferPos = (outputBufferPos + 1) % outputBuffer.getNumSamples();
-            
-            // Get delayed dry sample
-            float drySample = dryDelay.popSample(0);
-            dryDelay.pushSample(0, channelData[i]);
+    auto* channelData = buffer.getWritePointer(0); // This class now processes mono
 
-            // Mix dry/wet and apply gain
-            channelData[i] = (drySample * (1.0f - mix) + wetSample * mix) * outputGain;
+    for (int i = 0; i < numSamples; ++i)
+    {
+        // Store input sample
+        inputBuffer.setSample(0, inputBufferPos, channelData[i]);
+        inputBufferPos = (inputBufferPos + 1) % inputBuffer.getNumSamples();
+        samplesInInputBuffer++;
+
+        // Process a frame when we have enough samples
+        if (samplesInInputBuffer >= hopSize)
+        {
+            float pitchShift = smoother->getNextValue();
+            float pitchShiftRatio = std::pow(2.0f, pitchShift / 12.0f);
+            processFrame(pitchShiftRatio);
+            samplesInInputBuffer -= hopSize;
         }
+
+        // Get the processed output sample and write it to the buffer
+        float processedSample = outputBuffer.getSample(0, outputBufferPos);
+        outputBuffer.setSample(0, outputBufferPos, 0.0f); // Clear for next cycle
+        outputBufferPos = (outputBufferPos + 1) % outputBuffer.getNumSamples();
+
+        channelData[i] = processedSample;
     }
 }
 
