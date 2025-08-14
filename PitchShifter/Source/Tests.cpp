@@ -50,9 +50,10 @@ public:
 
         float maxLevel = 0.0f;
         int maxIndex = 0;
+        auto* magnitudes = fftBuffer.getReadPointer(0);
         for (int i = 0; i < 1024; ++i)
         {
-            float level = fft.getMagnitude(i);
+            float level = magnitudes[i];
             if (level > maxLevel)
             {
                 maxLevel = level;
