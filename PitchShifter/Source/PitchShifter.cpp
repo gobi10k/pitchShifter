@@ -59,22 +59,18 @@ void PitchShifter::process(juce::AudioBuffer<float>& buffer, juce::LinearSmoothe
 
         for (int i = 0; i < numSamples; ++i)
         {
-            // Get a sample from the output buffer
+            const float inSample = channelData[i];
             const float outSample = outputBuffer.getSample(0, outputBufferPos);
-            // Overwrite the oldest sample in the output buffer
-            outputBuffer.setSample(0, outputBufferPos, 0.0f);
-            // Write the output sample to the main buffer
+
             channelData[i] = outSample;
 
-            // Increment the output buffer position
+            outputBuffer.setSample(0, outputBufferPos, 0.0f);
             outputBufferPos = (outputBufferPos + 1) % fftSize;
 
-            // Add the input sample to our input buffer
-            inputBuffer.setSample(0, inputBufferPos, channelData[i]);
+            inputBuffer.setSample(0, inputBufferPos, inSample);
             inputBufferPos = (inputBufferPos + 1) % fftSize;
             samplesInInputBuffer++;
 
-            // If we have enough samples for a hop, process a frame
             if (samplesInInputBuffer >= hopSize)
             {
                 float pitchShift = smoother->getNextValue();
