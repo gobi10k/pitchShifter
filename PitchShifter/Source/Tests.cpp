@@ -62,7 +62,7 @@ private:
         // Process several blocks to allow the algorithm to stabilize
         for (int block = 0; block < 10; ++block)
         {
-            shifter.process(buffer, &smoother);
+            shifter.process(buffer, &smoother, 1.0f, 1.0f); // Add gain parameters
         }
         
         // Check that output contains energy (basic sanity check)
@@ -108,7 +108,7 @@ private:
             // Process multiple blocks
             for (int block = 0; block < 5; ++block)
             {
-                shifter.process(buffer, &smoother);
+                shifter.process(buffer, &smoother, 1.0f, 1.0f); // Add gain parameters
             }
             
             // Check output is reasonable
@@ -137,7 +137,7 @@ private:
         
         for (int block = 0; block < 8; ++block)
         {
-            shifter.process(bufferWithFormants, &smoother);
+            shifter.process(bufferWithFormants, &smoother, 1.0f, 1.0f); // Add gain parameters
         }
         
         // Test without formant preservation
@@ -152,7 +152,7 @@ private:
         
         for (int block = 0; block < 8; ++block)
         {
-            shifter.process(bufferWithoutFormants, &smoother);
+            shifter.process(bufferWithoutFormants, &smoother, 1.0f, 1.0f); // Add gain parameters
         }
         
         // Both should produce valid output
@@ -189,7 +189,7 @@ private:
             float pitch = 12.0f * std::sin(block * 0.1f); // ±12 semitones
             smoother.setTargetValue(pitch);
             
-            shifter.process(buffer, &smoother);
+            shifter.process(buffer, &smoother, 1.0f, 1.0f); // Add gain parameters
         }
         
         auto endTime = juce::Time::getHighResolutionTicks();
@@ -222,7 +222,7 @@ private:
             
             // Test with silence
             buffer.clear();
-            shifter.process(buffer, &smoother);
+            shifter.process(buffer, &smoother, 1.0f, 1.0f); // Add gain parameters
             expect(!buffer.hasBeenCleared(), "Should handle silence without crashing");
             
             // Test with very loud signal
@@ -231,7 +231,7 @@ private:
             {
                 buffer.setSample(0, i, (i % 2 == 0) ? 1.0f : -1.0f); // Square wave
             }
-            shifter.process(buffer, &smoother);
+            shifter.process(buffer, &smoother, 1.0f, 1.0f); // Add gain parameters
             
             float maxOutput = buffer.getMagnitude(0, 0, blockSize);
             expect(maxOutput < 10.0f, "Should handle loud input without excessive output at " +
@@ -245,7 +245,7 @@ private:
             smoother.setTargetValue(randomPitch);
             
             createTestSignal(buffer, sampleRate, i);
-            shifter.process(buffer, &smoother);
+            shifter.process(buffer, &smoother, 1.0f, 1.0f); // Add gain parameters
         }
         
         expect(true, "Should handle rapid pitch changes without crashing");

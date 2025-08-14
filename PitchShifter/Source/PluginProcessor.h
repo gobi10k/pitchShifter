@@ -9,7 +9,7 @@
 #pragma once
 
 #include <JuceHeader.h>
-#include "PitchShifter.h"
+#include "BBDPitchShifter.h"
 #include <juce_dsp/juce_dsp.h>
 
 //==============================================================================
@@ -62,14 +62,12 @@ private:
     juce::AudioProcessorValueTreeState apvts;
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    juce::OwnedArray<PitchShifter> dryShifters;
-    juce::OwnedArray<PitchShifter> wetShifters;
+    juce::OwnedArray<BBDPitchShifter> dryShifters;
+    juce::OwnedArray<BBDPitchShifter> wetShifters;
     juce::OwnedArray<juce::LinearSmoothedValue<float>> smoothedWetPitch;
     
     // Parameter tracking for updates
     float lastGlide = -1.0f;
-    int lastQuality = -1;
-    bool lastFormantPreservation = true;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PitchShifterAudioProcessor)
 };
