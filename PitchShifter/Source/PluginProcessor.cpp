@@ -188,7 +188,6 @@ void PitchShifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         pitchShifters[channel]->process(wetChannelBuffer, pitchRatio);
     }
 
-    const float wetGainBoost = 1.41f;
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
         auto* channelData = buffer.getWritePointer(channel);
@@ -203,7 +202,7 @@ void PitchShifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             dryDelayLines[channel]->pushSample(0, dryInput);
             const float drySample = dryDelayLines[channel]->popSample(0);
 
-            const float wetSample = wetData[sample] * wetGainBoost;
+            const float wetSample = wetData[sample]; // Boost is now handled dynamically
 
             channelData[sample] = (drySample * dryMix + wetSample * wetMix) * outputGain;
         }

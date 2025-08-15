@@ -44,10 +44,9 @@ void PitchShifter::reset()
 
 float PitchShifter::interpolatedRead(float readPos)
 {
-    int readPosInt = static_cast<int>(readPos);
+    int readPosInt = static_cast<int>(floor(readPos));
     float frac = readPos - readPosInt;
 
-    // Ensure buffer indices are wrapped correctly and are positive
     int readPos1 = (readPosInt + delayBufferSize) % delayBufferSize;
     int readPos2 = (readPos1 + 1) % delayBufferSize;
 
@@ -62,6 +61,7 @@ void PitchShifter::process(juce::AudioBuffer<float>& buffer, float pitchRatio)
     auto* channelData = buffer.getWritePointer(0);
     const int numSamples = buffer.getNumSamples();
     const float grainSize = sampleRate * 0.01f; // 10ms grains
+    const float gainCompensation = 1.0f / std::sqrt(pitchRatio);
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -69,22 +69,22 @@ void PitchShifter::process(juce::AudioBuffer<float>& buffer, float pitchRatio)
         float inputSample = channelData[i];
         delayBuffer.setSample(0, (int)writePointer, inputSample);
 
-        // Calculate crossfade gains
-        float phaseA = fmod(readPointerA - writePointer + delayBufferSize, grainSize) / grainSize;
+        // Calculate crossfade gains - improved calculation
+        float phaseA = fmodf((writePointer - readPointerA + delayBufferSize) / grainSize, 1.0f);
         float gainA = std::sin(phaseA * juce::MathConstants<float>::pi);
 
-        float phaseB = fmod(readPointerB - writePointer + delayBufferSize, grainSize) / grainSize;
+        float phaseB = fmodf((writePointer - readPointerB + delayBufferSize) / grainSize, 1.0f);
         float gainB = std::sin(phaseB * juce::MathConstants<float>::pi);
 
         // Read with interpolation
         float sampleA = interpolatedRead(readPointerA) * gainA;
         float sampleB = interpolatedRead(readPointerB) * gainB;
 
-        // Sum outputs
-        float outputSample = sampleA + sampleB;
+        // Sum outputs with gain compensation
+        float outputSample = (sampleA + sampleB) * gainCompensation;
 
-        // Apply gentle filtering
-        float cutoff = juce::jmap(pitchRatio, 0.5f, 2.0f, 8000.0f, 18000.0f);
+        // Apply gentler filtering
+        float cutoff = juce::jmap(pitchRatio, 0.5f, 2.0f, 10000.0f, 16000.0f);
         filter.setCutoffFrequency(cutoff);
         outputSample = filter.processSample(0, outputSample);
 
@@ -92,8 +92,8 @@ void PitchShifter::process(juce::AudioBuffer<float>& buffer, float pitchRatio)
         channelData[i] = outputSample;
 
         // Advance pointers
-        writePointer = fmod(writePointer + 1.0f, (float)delayBufferSize);
-        readPointerA = fmod(readPointerA + pitchRatio, (float)delayBufferSize);
-        readPointerB = fmod(readPointerB + pitchRatio, (float)delayBufferSize);
+        writePointer = fmodf(writePointer + 1.0f, (float)delayBufferSize);
+        readPointerA = fmodf(readPointerA + pitchRatio, (float)delayBufferSize);
+        readPointerB = fmodf(readPointerB + pitchRatio, (float)delayBufferSize);
     }
 }
