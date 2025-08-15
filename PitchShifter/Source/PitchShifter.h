@@ -35,5 +35,8 @@ private:
     float readPointerB;
     float writePointer;
 
+    // Helper for reading from the delay line
+    float interpolatedRead(float readPos);
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PitchShifter)
 };
