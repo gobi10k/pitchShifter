@@ -14,8 +14,8 @@ PitchShifterAudioProcessorEditor::PitchShifterAudioProcessorEditor (PitchShifter
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
     // Pitch Slider
-    pitchSlider.setSliderStyle(juce::Slider::SliderStyle::LinearVertical);
-    pitchSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 80, 20);
+    pitchSlider.setSliderStyle(juce::Slider::SliderStyle::Rotary);
+    pitchSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
     pitchSlider.setColour(juce::Slider::textBoxTextColourId, juce::Colours::white);
     addAndMakeVisible(pitchSlider);
     
@@ -40,31 +40,6 @@ PitchShifterAudioProcessorEditor::PitchShifterAudioProcessorEditor (PitchShifter
     
     glideAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), "GLIDE", glideSlider);
-
-    // Quality ComboBox
-    qualityComboBox.addItem("Fast", 1);
-    qualityComboBox.addItem("Balanced", 2);
-    qualityComboBox.addItem("High Quality", 3);
-    qualityComboBox.setColour(juce::ComboBox::textColourId, juce::Colours::white);
-    qualityComboBox.setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff2a2a2a));
-    addAndMakeVisible(qualityComboBox);
-
-    qualityLabel.setText("Quality", juce::dontSendNotification);
-    qualityLabel.setJustificationType(juce::Justification::centred);
-    qualityLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    addAndMakeVisible(qualityLabel);
-
-    qualityAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.getAPVTS(), "QUALITY", qualityComboBox);
-
-    // Formant Preservation Toggle
-    formantToggle.setButtonText("Formant Preserve");
-    formantToggle.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
-    formantToggle.setColour(juce::ToggleButton::tickColourId, juce::Colour(0xff00ff00));
-    addAndMakeVisible(formantToggle);
-
-    formantAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.getAPVTS(), "FORMANT_PRESERVATION", formantToggle);
 
     // Mix Slider
     mixSlider.setSliderStyle(juce::Slider::SliderStyle::Rotary);
@@ -95,7 +70,7 @@ PitchShifterAudioProcessorEditor::PitchShifterAudioProcessorEditor (PitchShifter
         audioProcessor.getAPVTS(), "OUTPUT_GAIN", outputGainSlider);
 
     // Set window size
-    setSize (400, 500);
+    setSize (400, 350); // Reduced height
 }
 
 PitchShifterAudioProcessorEditor::~PitchShifterAudioProcessorEditor()
@@ -114,70 +89,40 @@ void PitchShifterAudioProcessorEditor::paint (juce::Graphics& g)
     // Title
     g.setColour(juce::Colours::white);
     g.setFont(juce::Font("Arial", 20.0f, juce::Font::bold));
-    g.drawText("Modern Pitch Shifter", 0, 10, getWidth(), 30, juce::Justification::centred);
-    
-    // Version info
-    g.setFont(juce::Font("Arial", 12.0f, juce::Font::plain));
-    g.setColour(juce::Colour(0xffaaaaaa));
-    g.drawText("High-Quality Real-Time Processing", 0, 35, getWidth(), 20, juce::Justification::centred);
-
-    // Section separators
-    g.setColour(juce::Colour(0xff444444));
-    g.drawLine(20, 70, getWidth() - 20, 70, 1.0f);
-    g.drawLine(20, 280, getWidth() - 20, 280, 1.0f);
+    g.drawText("Pitch Shifter", 0, 10, getWidth(), 30, juce::Justification::centred);
 }
 
 void PitchShifterAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds();
-    area.removeFromTop(60); // Space for title
+    area.removeFromTop(50); // Space for title
+    area.reduce(20, 20); // Add some padding around the controls
 
-    // Main pitch control section
-    auto pitchSection = area.removeFromTop(180);
-    pitchSection.reduce(20, 10);
+    auto topRow = area.removeFromTop(area.getHeight() / 2);
+    auto bottomRow = area;
+    bottomRow.removeFromTop(20); // spacing
 
-    // Pitch slider takes most of the space
-    auto pitchArea = pitchSection.removeFromLeft(120);
-    pitchLabel.setBounds(pitchArea.removeFromTop(20));
-    pitchSlider.setBounds(pitchArea);
+    auto topLeft = topRow.removeFromLeft(topRow.getWidth() / 2);
+    auto topRight = topRow;
+    topRight.removeFromLeft(20);
 
-    // Glide control next to pitch
-    pitchSection.removeFromLeft(20); // spacing
-    auto glideArea = pitchSection.removeFromLeft(100);
-    glideLabel.setBounds(glideArea.removeFromTop(20));
-    glideSlider.setBounds(glideArea.reduced(10));
+    auto bottomLeft = bottomRow.removeFromLeft(bottomRow.getWidth() / 2);
+    auto bottomRight = bottomRow;
+    bottomRight.removeFromLeft(20);
 
-    area.removeFromTop(20); // spacing
+    // Pitch
+    pitchLabel.setBounds(topLeft.removeFromTop(20));
+    pitchSlider.setBounds(topLeft.reduced(10));
 
-    // Quality and formant section
-    auto controlSection = area.removeFromTop(100);
-    controlSection.reduce(30, 10);
+    // Glide
+    glideLabel.setBounds(topRight.removeFromTop(20));
+    glideSlider.setBounds(topRight.reduced(10));
 
-    // Quality selection
-    auto qualityArea = controlSection.removeFromTop(45);
-    qualityLabel.setBounds(qualityArea.removeFromTop(20));
-    qualityComboBox.setBounds(qualityArea.reduced(0, 2));
+    // Mix
+    mixLabel.setBounds(bottomLeft.removeFromTop(20));
+    mixSlider.setBounds(bottomLeft.reduced(10));
 
-    controlSection.removeFromTop(10); // spacing
-
-    // Formant preservation toggle
-    formantToggle.setBounds(controlSection.removeFromTop(30));
-
-    area.removeFromTop(20); // spacing
-
-    // Mix and Output Gain section
-    auto gainSection = area.removeFromTop(120);
-    gainSection.reduce(20, 10);
-
-    // Mix control
-    auto mixArea = gainSection.removeFromLeft(150);
-    mixLabel.setBounds(mixArea.removeFromTop(20));
-    mixSlider.setBounds(mixArea.reduced(10));
-
-    gainSection.removeFromLeft(10); // spacing
-
-    // Output gain
-    auto outputGainArea = gainSection.removeFromLeft(150);
-    outputGainLabel.setBounds(outputGainArea.removeFromTop(20));
-    outputGainSlider.setBounds(outputGainArea.reduced(10));
+    // Output Gain
+    outputGainLabel.setBounds(bottomRight.removeFromTop(20));
+    outputGainSlider.setBounds(bottomRight.reduced(10));
 }

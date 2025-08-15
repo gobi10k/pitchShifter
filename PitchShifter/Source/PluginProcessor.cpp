@@ -34,7 +34,7 @@ PitchShifterAudioProcessor::~PitchShifterAudioProcessor()
 //==============================================================================
 const juce::String PitchShifterAudioProcessor::getName() const
 {
-    return "Modern PitchShifter";
+    return "Pitch Shifter";
 }
 
 bool PitchShifterAudioProcessor::acceptsMidi() const
@@ -66,25 +66,12 @@ bool PitchShifterAudioProcessor::isMidiEffect() const
 
 double PitchShifterAudioProcessor::getTailLengthSeconds() const
 {
-    // Return latency based on current quality setting
-    if (apvts.getRawParameterValue("QUALITY"))
-    {
-        int quality = (int)*apvts.getRawParameterValue("QUALITY");
-        switch (quality)
-        {
-            case 0: return 0.009; // ~9ms for fast mode
-            case 1: return 0.019; // ~19ms for balanced mode
-            case 2: return 0.037; // ~37ms for high quality mode
-            default: return 0.02;
-        }
-    }
-    return 0.02; // Default
+    return 2.0; // Corresponds to maxDelayTime in PitchShifter
 }
 
 int PitchShifterAudioProcessor::getNumPrograms()
 {
-    return 1;   // NB: some hosts don't cope very well if you tell them there are 0 programs,
-                // so this should be at least 1, even if you're not really implementing programs.
+    return 1;
 }
 
 int PitchShifterAudioProcessor::getCurrentProgram()
@@ -111,47 +98,30 @@ void PitchShifterAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     juce::dsp::ProcessSpec spec;
     spec.sampleRate = sampleRate;
     spec.maximumBlockSize = samplesPerBlock;
-    spec.numChannels = getTotalNumOutputChannels();
+    spec.numChannels = 1; // Each shifter instance processes one channel
 
-    pitchShifters.clear();
-    smoothedPitch.clear();
+    dryShifters.clear();
+    wetShifters.clear();
+    smoothedWetPitch.clear();
 
-    for (int i = 0; i < spec.numChannels; ++i)
+    for (int i = 0; i < getTotalNumOutputChannels(); ++i)
     {
-        pitchShifters.add(new PitchShifter());
+        dryShifters.add(new PitchShifter());
+        dryShifters[i]->prepare(spec);
 
-        // Set quality BEFORE prepareToPlay for proper initialization
-        int quality = (int)*apvts.getRawParameterValue("QUALITY");
-        pitchShifters[i]->setQuality(quality);
-        pitchShifters[i]->setFormantPreservation(*apvts.getRawParameterValue("FORMANT_PRESERVATION") > 0.5f);
+        wetShifters.add(new PitchShifter());
+        wetShifters[i]->prepare(spec);
 
-        // Now prepare with the correct settings
-        pitchShifters[i]->prepareToPlay(sampleRate, samplesPerBlock);
-
-        smoothedPitch.add(new juce::LinearSmoothedValue<float>());
+        smoothedWetPitch.add(new juce::LinearSmoothedValue<float>());
         float glideTime = *apvts.getRawParameterValue("GLIDE") / 1000.0f;
-        smoothedPitch[i]->reset(sampleRate, glideTime > 0.0f ? glideTime : 0.001f);
+        smoothedWetPitch[i]->reset(sampleRate, glideTime > 0.0f ? glideTime : 0.001f);
     }
 
-    // Initialize parameter tracking
     lastGlide = *apvts.getRawParameterValue("GLIDE");
-    lastQuality = (int)*apvts.getRawParameterValue("QUALITY");
-    lastFormantPreservation = *apvts.getRawParameterValue("FORMANT_PRESERVATION") > 0.5f;
-
-    // Prepare delay lines
-    dryDelayLines.clear();
-    for (int i = 0; i < spec.numChannels; ++i)
-    {
-        dryDelayLines.add(new juce::dsp::DelayLine<float>());
-        dryDelayLines[i]->prepare(spec);
-        dryDelayLines[i]->setDelay(pitchShifters[i]->getFftSize());
-    }
 }
 
 void PitchShifterAudioProcessor::releaseResources()
 {
-    // When playback stops, you can use this as an opportunity to free up any
-    // spare memory, etc.
 }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -161,15 +131,10 @@ bool PitchShifterAudioProcessor::isBusesLayoutSupported (const BusesLayout& layo
     juce::ignoreUnused (layouts);
     return true;
   #else
-    // This is the place where you check if the layout is supported.
-    // In this template code we only support mono or stereo.
-    // Some plugin hosts, such as certain GarageBand versions, will only
-    // load plugins that support stereo bus layouts.
     if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
      && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
         return false;
 
-    // This checks if the input layout matches the output layout
    #if ! JucePlugin_IsSynth
     if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
         return false;
@@ -186,71 +151,51 @@ void PitchShifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     auto totalNumInputChannels  = getTotalNumInputChannels();
     auto totalNumOutputChannels = getTotalNumOutputChannels();
 
-    // Clear any output channels that didn't contain input data
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
 
-    // Get current parameter values
     float pitch = *apvts.getRawParameterValue("PITCH");
     float glide = *apvts.getRawParameterValue("GLIDE");
-    int quality = (int)*apvts.getRawParameterValue("QUALITY");
-    bool formantPreservation = *apvts.getRawParameterValue("FORMANT_PRESERVATION") > 0.5f;
     float mix = *apvts.getRawParameterValue("MIX");
     float outputGainDB = *apvts.getRawParameterValue("OUTPUT_GAIN");
     float outputGain = juce::Decibels::decibelsToGain(outputGainDB);
 
-    // Update glide time if changed
     if (glide != lastGlide)
     {
         for (int channel = 0; channel < totalNumInputChannels; ++channel)
         {
             float rampLength = glide > 0.0f ? glide / 1000.0f : 0.001f;
-            smoothedPitch[channel]->reset(getSampleRate(), rampLength);
+            smoothedWetPitch[channel]->reset(getSampleRate(), rampLength);
         }
         lastGlide = glide;
     }
 
-    // Update quality if changed - requires re-initialization
-    if (quality != lastQuality)
-    {
-        for (int channel = 0; channel < totalNumInputChannels; ++channel)
-        {
-            pitchShifters[channel]->setQuality(quality);
-            // Re-initialize with new quality settings
-            pitchShifters[channel]->prepareToPlay(getSampleRate(), buffer.getNumSamples());
-            pitchShifters[channel]->setFormantPreservation(formantPreservation);
-        }
-        lastQuality = quality;
-    }
-
-    // Update formant preservation if changed
-    if (formantPreservation != lastFormantPreservation)
-    {
-        for (int channel = 0; channel < totalNumInputChannels; ++channel)
-        {
-            pitchShifters[channel]->setFormantPreservation(formantPreservation);
-        }
-        lastFormantPreservation = formantPreservation;
-    }
-
-    // Create a temporary buffer for the wet signal
-    juce::AudioBuffer<float> wetBuffer(buffer.getNumChannels(), buffer.getNumSamples());
-    wetBuffer.copyFrom(0, 0, buffer, 0, 0, buffer.getNumSamples());
-    if (buffer.getNumChannels() > 1)
-        wetBuffer.copyFrom(1, 0, buffer, 1, 0, buffer.getNumSamples());
-
-    // Process the wet signal
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        smoothedPitch[channel]->setTargetValue(pitch);
-        auto wetChannelBuffer = wetBuffer.getSlice(channel, 0, wetBuffer.getNumSamples());
-        pitchShifters[channel]->process(wetChannelBuffer, smoothedPitch[channel]);
+        smoothedWetPitch[channel]->setTargetValue(pitch);
     }
 
-    // Mix the dry (original) and wet signals
+    juce::AudioBuffer<float> dryBuffer(buffer);
+    juce::AudioBuffer<float> wetBuffer(buffer);
+
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        auto* channelData = buffer.getWritePointer(channel);
+        auto* dryChannelData = dryBuffer.getWritePointer(channel);
+        juce::AudioBuffer<float> dryChannelBuffer(&dryChannelData, 1, buffer.getNumSamples());
+        dryShifters[channel]->process(dryChannelBuffer, 1.0f);
+
+        auto* wetChannelData = wetBuffer.getWritePointer(channel);
+        juce::AudioBuffer<float> wetChannelBuffer(&wetChannelData, 1, buffer.getNumSamples());
+        float wetPitch = smoothedWetPitch[channel]->getNextValue();
+        float wetPitchRatio = std::pow(2.0f, wetPitch / 12.0f);
+        wetShifters[channel]->process(wetChannelBuffer, wetPitchRatio);
+    }
+
+    const float wetGainBoost = 1.41f;
+    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    {
+        auto* outputData = buffer.getWritePointer(channel);
+        const auto* dryData = dryBuffer.getReadPointer(channel);
         const auto* wetData = wetBuffer.getReadPointer(channel);
 
         const float dryMix = std::cos(mix * juce::MathConstants<float>::pi * 0.5f);
@@ -258,11 +203,9 @@ void PitchShifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
         for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
         {
-            dryDelayLines[channel]->pushSample(0, channelData[sample]);
-            const float drySample = dryDelayLines[channel]->popSample(0);
-            const float wetSample = wetData[sample];
-
-            channelData[sample] = (drySample * dryMix + wetSample * wetMix) * outputGain;
+            const float drySample = dryData[sample];
+            const float wetSample = wetData[sample] * wetGainBoost;
+            outputData[sample] = (drySample * dryMix + wetSample * wetMix) * outputGain;
         }
     }
 }
@@ -270,7 +213,7 @@ void PitchShifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 //==============================================================================
 bool PitchShifterAudioProcessor::hasEditor() const
 {
-    return true; // (change this to false if you choose to not supply an editor)
+    return true;
 }
 
 juce::AudioProcessorEditor* PitchShifterAudioProcessor::createEditor()
@@ -281,9 +224,6 @@ juce::AudioProcessorEditor* PitchShifterAudioProcessor::createEditor()
 //==============================================================================
 void PitchShifterAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    // You should use this method to store your parameters in the memory block.
-    // You could do that either as raw data, or use the XML or ValueTree classes
-    // as intermediaries to make it easy to save and load complex data.
     auto state = apvts.copyState();
     std::unique_ptr<juce::XmlElement> xml (state.createXml());
     copyXmlToBinary (*xml, destData);
@@ -291,8 +231,6 @@ void PitchShifterAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
 
 void PitchShifterAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    // You should use this method to restore your parameters from this memory block,
-    // whose contents will have been created by the getStateInformation() call.
     std::unique_ptr<juce::XmlElement> xmlState (getXmlFromBinary (data, sizeInBytes));
     if (xmlState.get() != nullptr)
         if (xmlState->hasTagName (apvts.state.getType()))
@@ -303,7 +241,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout PitchShifterAudioProcessor::
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
 
-    // Pitch control (-24 to +24 semitones)
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         "PITCH", "Pitch",
         juce::NormalisableRange<float>(-24.0f, 24.0f, 0.01f),
@@ -314,7 +251,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout PitchShifterAudioProcessor::
             return juce::String(value >= 0 ? "+" : "") + juce::String(value, 2) + " st";
         }));
 
-    // Glide time (0 to 1000ms)
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         "GLIDE", "Glide",
         juce::NormalisableRange<float>(0.0f, 1000.0f, 1.0f),
@@ -325,19 +261,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout PitchShifterAudioProcessor::
             return juce::String((int)value) + " ms";
         }));
 
-    // Quality setting (0=Fast, 1=Balanced, 2=High)
-    layout.add(std::make_unique<juce::AudioParameterChoice>(
-        "QUALITY", "Quality",
-        juce::StringArray{"Fast", "Balanced", "High Quality"},
-        1)); // Default to Balanced
-
-    // Formant preservation toggle
-    layout.add(std::make_unique<juce::AudioParameterBool>(
-        "FORMANT_PRESERVATION", "Formant Preserve",
-        true)); // Default enabled
-
-    // Bypass gain - removed, not needed
-    // Mix control instead (0 = dry, 1 = wet)
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         "MIX", "Mix",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f),
@@ -348,7 +271,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout PitchShifterAudioProcessor::
             return juce::String((int)(value * 100)) + "%";
         }));
 
-    // Output gain - normal range
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         "OUTPUT_GAIN", "Output Gain",
         juce::NormalisableRange<float>(-20.0f, 20.0f, 0.1f),
@@ -368,7 +290,6 @@ juce::AudioProcessorValueTreeState& PitchShifterAudioProcessor::getAPVTS()
 }
 
 //==============================================================================
-// This creates new instances of the plugin..
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new PitchShifterAudioProcessor();
