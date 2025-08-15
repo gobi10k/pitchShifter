@@ -26,7 +26,7 @@ private:
     juce::dsp::StateVariableTPTFilter<float> filter;
 
     // BBD parameters
-    static constexpr float maxDelayTime = 2.0f; // Maximum delay in seconds
+    static constexpr float maxDelayTime = 0.2f; // Maximum delay in seconds
     int delayBufferSize;
     float sampleRate;
 

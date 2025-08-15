@@ -66,7 +66,7 @@ bool PitchShifterAudioProcessor::isMidiEffect() const
 
 double PitchShifterAudioProcessor::getTailLengthSeconds() const
 {
-    return 2.0; // Corresponds to maxDelayTime in PitchShifter
+    return 0.2; // Corresponds to new maxDelayTime
 }
 
 int PitchShifterAudioProcessor::getNumPrograms()
@@ -98,23 +98,25 @@ void PitchShifterAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     juce::dsp::ProcessSpec spec;
     spec.sampleRate = sampleRate;
     spec.maximumBlockSize = samplesPerBlock;
-    spec.numChannels = 1; // Each shifter instance processes one channel
+    spec.numChannels = 1;
 
-    dryShifters.clear();
-    wetShifters.clear();
-    smoothedWetPitch.clear();
+    pitchShifters.clear();
+    dryDelayLines.clear();
+    smoothedPitch.clear();
 
     for (int i = 0; i < getTotalNumOutputChannels(); ++i)
     {
-        dryShifters.add(new PitchShifter());
-        dryShifters[i]->prepare(spec);
+        pitchShifters.add(new PitchShifter());
+        pitchShifters[i]->prepare(spec);
 
-        wetShifters.add(new PitchShifter());
-        wetShifters[i]->prepare(spec);
+        dryDelayLines.add(new juce::dsp::DelayLine<float>());
+        // Set delay to half the BBD buffer size for averaging
+        dryDelayLines[i]->prepare(spec);
+        dryDelayLines[i]->setDelay(sampleRate * 0.2f * 0.5f);
 
-        smoothedWetPitch.add(new juce::LinearSmoothedValue<float>());
+        smoothedPitch.add(new juce::LinearSmoothedValue<float>());
         float glideTime = *apvts.getRawParameterValue("GLIDE") / 1000.0f;
-        smoothedWetPitch[i]->reset(sampleRate, glideTime > 0.0f ? glideTime : 0.001f);
+        smoothedPitch[i]->reset(sampleRate, glideTime > 0.0f ? glideTime : 0.001f);
     }
 
     lastGlide = *apvts.getRawParameterValue("GLIDE");
@@ -165,37 +167,31 @@ void PitchShifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         for (int channel = 0; channel < totalNumInputChannels; ++channel)
         {
             float rampLength = glide > 0.0f ? glide / 1000.0f : 0.001f;
-            smoothedWetPitch[channel]->reset(getSampleRate(), rampLength);
+            smoothedPitch[channel]->reset(getSampleRate(), rampLength);
         }
         lastGlide = glide;
     }
 
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        smoothedWetPitch[channel]->setTargetValue(pitch);
+        smoothedPitch[channel]->setTargetValue(pitch);
     }
 
-    juce::AudioBuffer<float> dryBuffer(buffer);
     juce::AudioBuffer<float> wetBuffer(buffer);
 
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        auto* dryChannelData = dryBuffer.getWritePointer(channel);
-        juce::AudioBuffer<float> dryChannelBuffer(&dryChannelData, 1, buffer.getNumSamples());
-        dryShifters[channel]->process(dryChannelBuffer, 1.0f);
-
-        auto* wetChannelData = wetBuffer.getWritePointer(channel);
-        juce::AudioBuffer<float> wetChannelBuffer(&wetChannelData, 1, buffer.getNumSamples());
-        float wetPitch = smoothedWetPitch[channel]->getNextValue();
-        float wetPitchRatio = std::pow(2.0f, wetPitch / 12.0f);
-        wetShifters[channel]->process(wetChannelBuffer, wetPitchRatio);
+        auto* channelData = wetBuffer.getWritePointer(channel);
+        juce::AudioBuffer<float> wetChannelBuffer(&channelData, 1, buffer.getNumSamples());
+        float currentPitch = smoothedPitch[channel]->getNextValue();
+        float pitchRatio = std::pow(2.0f, currentPitch / 12.0f);
+        pitchShifters[channel]->process(wetChannelBuffer, pitchRatio);
     }
 
     const float wetGainBoost = 1.41f;
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        auto* outputData = buffer.getWritePointer(channel);
-        const auto* dryData = dryBuffer.getReadPointer(channel);
+        auto* channelData = buffer.getWritePointer(channel);
         const auto* wetData = wetBuffer.getReadPointer(channel);
 
         const float dryMix = std::cos(mix * juce::MathConstants<float>::pi * 0.5f);
@@ -203,9 +199,13 @@ void PitchShifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
         for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
         {
-            const float drySample = dryData[sample];
+            const float dryInput = channelData[sample];
+            dryDelayLines[channel]->pushSample(0, dryInput);
+            const float drySample = dryDelayLines[channel]->popSample(0);
+
             const float wetSample = wetData[sample] * wetGainBoost;
-            outputData[sample] = (drySample * dryMix + wetSample * wetMix) * outputGain;
+
+            channelData[sample] = (drySample * dryMix + wetSample * wetMix) * outputGain;
         }
     }
 }
