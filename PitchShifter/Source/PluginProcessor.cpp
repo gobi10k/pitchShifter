@@ -113,27 +113,39 @@ void PitchShifterAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     spec.maximumBlockSize = samplesPerBlock;
     spec.numChannels = getTotalNumOutputChannels();
 
-    dryShifters.clear();
-    wetShifters.clear();
-    smoothedWetPitch.clear();
+    pitchShifters.clear();
+    smoothedPitch.clear();
 
     for (int i = 0; i < spec.numChannels; ++i)
     {
-        dryShifters.add(new BBDPitchShifter());
-        dryShifters[i]->prepare(spec);
+        pitchShifters.add(new PitchShifter());
 
-        wetShifters.add(new BBDPitchShifter());
-        wetShifters[i]->prepare(spec);
+        // Set quality BEFORE prepareToPlay for proper initialization
+        int quality = (int)*apvts.getRawParameterValue("QUALITY");
+        pitchShifters[i]->setQuality(quality);
+        pitchShifters[i]->setFormantPreservation(*apvts.getRawParameterValue("FORMANT_PRESERVATION") > 0.5f);
 
-        smoothedWetPitch.add(new juce::LinearSmoothedValue<float>());
+        // Now prepare with the correct settings
+        pitchShifters[i]->prepareToPlay(sampleRate, samplesPerBlock);
+
+        smoothedPitch.add(new juce::LinearSmoothedValue<float>());
         float glideTime = *apvts.getRawParameterValue("GLIDE") / 1000.0f;
-        smoothedWetPitch[i]->reset(sampleRate, glideTime > 0.0f ? glideTime : 0.001f);
+        smoothedPitch[i]->reset(sampleRate, glideTime > 0.0f ? glideTime : 0.001f);
     }
 
     // Initialize parameter tracking
     lastGlide = *apvts.getRawParameterValue("GLIDE");
-    lastQuality = -1; // Reset to ensure param updates are triggered
-    lastFormantPreservation = true; // Reset
+    lastQuality = (int)*apvts.getRawParameterValue("QUALITY");
+    lastFormantPreservation = *apvts.getRawParameterValue("FORMANT_PRESERVATION") > 0.5f;
+
+    // Prepare delay lines
+    dryDelayLines.clear();
+    for (int i = 0; i < spec.numChannels; ++i)
+    {
+        dryDelayLines.add(new juce::dsp::DelayLine<float>());
+        dryDelayLines[i]->prepare(spec);
+        dryDelayLines[i]->setDelay(pitchShifters[i]->getFftSize());
+    }
 }
 
 void PitchShifterAudioProcessor::releaseResources()
@@ -174,70 +186,83 @@ void PitchShifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     auto totalNumInputChannels  = getTotalNumInputChannels();
     auto totalNumOutputChannels = getTotalNumOutputChannels();
 
+    // Clear any output channels that didn't contain input data
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
 
     // Get current parameter values
     float pitch = *apvts.getRawParameterValue("PITCH");
     float glide = *apvts.getRawParameterValue("GLIDE");
+    int quality = (int)*apvts.getRawParameterValue("QUALITY");
+    bool formantPreservation = *apvts.getRawParameterValue("FORMANT_PRESERVATION") > 0.5f;
     float mix = *apvts.getRawParameterValue("MIX");
     float outputGainDB = *apvts.getRawParameterValue("OUTPUT_GAIN");
     float outputGain = juce::Decibels::decibelsToGain(outputGainDB);
 
-    // Update glide time if it has changed.
+    // Update glide time if changed
     if (glide != lastGlide)
     {
         for (int channel = 0; channel < totalNumInputChannels; ++channel)
         {
             float rampLength = glide > 0.0f ? glide / 1000.0f : 0.001f;
-            smoothedWetPitch[channel]->reset(getSampleRate(), rampLength);
+            smoothedPitch[channel]->reset(getSampleRate(), rampLength);
         }
         lastGlide = glide;
     }
 
-    // Set target pitch for the wet path's smoother
-    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    // Update quality if changed - requires re-initialization
+    if (quality != lastQuality)
     {
-        smoothedWetPitch[channel]->setTargetValue(pitch);
+        for (int channel = 0; channel < totalNumInputChannels; ++channel)
+        {
+            pitchShifters[channel]->setQuality(quality);
+            // Re-initialize with new quality settings
+            pitchShifters[channel]->prepareToPlay(getSampleRate(), buffer.getNumSamples());
+            pitchShifters[channel]->setFormantPreservation(formantPreservation);
+        }
+        lastQuality = quality;
     }
 
-    // Create copies of the input buffer for parallel dry and wet processing
-    juce::AudioBuffer<float> dryBuffer(buffer);
-    juce::AudioBuffer<float> wetBuffer(buffer);
-
-    // Process each channel in parallel
-    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    // Update formant preservation if changed
+    if (formantPreservation != lastFormantPreservation)
     {
-        // 1. Process the Dry Path (0 pitch shift)
-        auto* dryChannelData = dryBuffer.getWritePointer(channel);
-        juce::AudioBuffer<float> dryChannelBuffer(&dryChannelData, 1, buffer.getNumSamples());
-        dryShifters[channel]->process(dryChannelBuffer, 1.0f);
-
-        // 2. Process the Wet Path (UI-controlled pitch shift)
-        auto* wetChannelData = wetBuffer.getWritePointer(channel);
-        juce::AudioBuffer<float> wetChannelBuffer(&wetChannelData, 1, buffer.getNumSamples());
-        float wetPitch = smoothedWetPitch[channel]->getNextValue();
-        float wetPitchRatio = std::pow(2.0f, wetPitch / 12.0f);
-        wetShifters[channel]->process(wetChannelBuffer, wetPitchRatio);
+        for (int channel = 0; channel < totalNumInputChannels; ++channel)
+        {
+            pitchShifters[channel]->setFormantPreservation(formantPreservation);
+        }
+        lastFormantPreservation = formantPreservation;
     }
 
-    // 3. Mix the parallel signals back into the main output buffer
-    const float wetGainBoost = 1.41f; // ~3dB boost for the wet signal
+    // Create a temporary buffer for the wet signal
+    juce::AudioBuffer<float> wetBuffer(buffer.getNumChannels(), buffer.getNumSamples());
+    wetBuffer.copyFrom(0, 0, buffer, 0, 0, buffer.getNumSamples());
+    if (buffer.getNumChannels() > 1)
+        wetBuffer.copyFrom(1, 0, buffer, 1, 0, buffer.getNumSamples());
+
+    // Process the wet signal
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        auto* outputData = buffer.getWritePointer(channel);
-        const auto* dryData = dryBuffer.getReadPointer(channel);
+        smoothedPitch[channel]->setTargetValue(pitch);
+        auto wetChannelBuffer = wetBuffer.getSlice(channel, 0, wetBuffer.getNumSamples());
+        pitchShifters[channel]->process(wetChannelBuffer, smoothedPitch[channel]);
+    }
+
+    // Mix the dry (original) and wet signals
+    for (int channel = 0; channel < totalNumInputChannels; ++channel)
+    {
+        auto* channelData = buffer.getWritePointer(channel);
         const auto* wetData = wetBuffer.getReadPointer(channel);
 
-        // Use an equal-power crossfade for a perceptually smooth blend
         const float dryMix = std::cos(mix * juce::MathConstants<float>::pi * 0.5f);
         const float wetMix = std::sin(mix * juce::MathConstants<float>::pi * 0.5f);
 
         for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
         {
-            const float drySample = dryData[sample];
-            const float wetSample = wetData[sample] * wetGainBoost;
-            outputData[sample] = (drySample * dryMix + wetSample * wetMix) * outputGain;
+            dryDelayLines[channel]->pushSample(0, channelData[sample]);
+            const float drySample = dryDelayLines[channel]->popSample(0);
+            const float wetSample = wetData[sample];
+
+            channelData[sample] = (drySample * dryMix + wetSample * wetMix) * outputGain;
         }
     }
 }
@@ -299,6 +324,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout PitchShifterAudioProcessor::
         [](float value, int) {
             return juce::String((int)value) + " ms";
         }));
+
+    // Quality setting (0=Fast, 1=Balanced, 2=High)
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        "QUALITY", "Quality",
+        juce::StringArray{"Fast", "Balanced", "High Quality"},
+        1)); // Default to Balanced
+
+    // Formant preservation toggle
+    layout.add(std::make_unique<juce::AudioParameterBool>(
+        "FORMANT_PRESERVATION", "Formant Preserve",
+        true)); // Default enabled
 
     // Bypass gain - removed, not needed
     // Mix control instead (0 = dry, 1 = wet)
