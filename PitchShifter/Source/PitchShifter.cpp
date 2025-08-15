@@ -37,33 +37,29 @@ void PitchShifter::reset()
     filter.reset();
 
     writePointer = 0.0f;
+    // Stagger the read pointers by half a grain size
+    const float grainSize = sampleRate * 0.05f; // 50ms grain
     readPointerA = 0.0f;
-    // Stagger the second tap by half the buffer size
-    readPointerB = (float)delayBufferSize / 2.0f;
+    readPointerB = grainSize / 2.0f;
 }
 
 void PitchShifter::process(juce::AudioBuffer<float>& buffer, float pitchRatio)
 {
     auto* channelData = buffer.getWritePointer(0);
     const int numSamples = buffer.getNumSamples();
-    const float grainSize = (float)delayBufferSize;
-    const float fadeTime = grainSize * 0.1f;
+    const float grainSize = sampleRate * 0.05f; // 50ms grains
 
     for (int i = 0; i < numSamples; ++i)
     {
         // 1. Write input to the manual delay buffer
         delayBuffer.setSample(0, (int)writePointer, channelData[i]);
 
-        // 2. Calculate gain for each tap based on its window position
-        float gainA = 1.0f;
-        float posInGrainA = fmod(readPointerA, grainSize);
-        if (posInGrainA < fadeTime) gainA = posInGrainA / fadeTime;
-        else if (posInGrainA > grainSize - fadeTime) gainA = (grainSize - posInGrainA) / fadeTime;
+        // 2. Calculate gain for each tap using a sine window for equal-power crossfade
+        float phaseA = fmod(readPointerA, grainSize) / grainSize;
+        float gainA = std::sin(phaseA * juce::MathConstants<float>::pi);
 
-        float gainB = 1.0f;
-        float posInGrainB = fmod(readPointerB, grainSize);
-        if (posInGrainB < fadeTime) gainB = posInGrainB / fadeTime;
-        else if (posInGrainB > grainSize - fadeTime) gainB = (grainSize - posInGrainB) / fadeTime;
+        float phaseB = fmod(readPointerB, grainSize) / grainSize;
+        float gainB = std::sin(phaseB * juce::MathConstants<float>::pi);
 
         // 3. Read from both taps with linear interpolation
         int readPosA1 = (int)readPointerA;
@@ -80,8 +76,8 @@ void PitchShifter::process(juce::AudioBuffer<float>& buffer, float pitchRatio)
         float sampleB2 = delayBuffer.getSample(0, readPosB2);
         float sampleB = (sampleB1 * (1.0f - fracB) + sampleB2 * fracB) * gainB;
 
-        // 4. Sum the crossfaded signals and normalize
-        float outputSample = (sampleA + sampleB) * 0.5f;
+        // 4. Sum the crossfaded signals. Normalization is implicitly handled by the sine windows.
+        float outputSample = sampleA + sampleB;
 
         // 5. Apply BBD-style low-pass filter
         float cutoff = 10000.0f / pitchRatio;
@@ -91,9 +87,9 @@ void PitchShifter::process(juce::AudioBuffer<float>& buffer, float pitchRatio)
         // 6. Write to output buffer
         channelData[i] = outputSample;
 
-        // 7. Advance pointers, wrapping around the buffer
-        writePointer = fmod(writePointer + 1.0f, grainSize);
-        readPointerA = fmod(readPointerA + pitchRatio, grainSize);
-        readPointerB = fmod(readPointerB + pitchRatio, grainSize);
+        // 7. Advance pointers, wrapping around the main buffer
+        writePointer = fmod(writePointer + 1.0f, (float)delayBufferSize);
+        readPointerA = fmod(readPointerA + pitchRatio, (float)delayBufferSize);
+        readPointerB = fmod(readPointerB + pitchRatio, (float)delayBufferSize);
     }
 }
