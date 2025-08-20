@@ -223,9 +223,7 @@ void PitchShiftAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
         noiseFilter[i].prepare(filterSpec);
     }
 
-    juce::dsp::ProcessSpec lfoSpec { sampleRate, (juce::uint32)samplesPerBlock, 1 };
-    lfo.prepare(lfoSpec);
-    lfo_sh_clock.prepare(lfoSpec);
+    lfoPhase = 0.0f;
 }
 
 void PitchShiftAudioProcessor::releaseResources()
@@ -288,43 +286,8 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     auto toneMode = apvts.getRawParameterValue("TONE_MODE")->load();
     auto noiseLevel = apvts.getRawParameterValue("NOISE")->load();
 
-    // Update LFO
-    lfo.setFrequency(lfoRate);
-    lfo_sh_clock.setFrequency(lfoRate);
-
     double sampleRate = getSampleRate();
-
-    // Modulate pitch and update pitch shifters
-    float lfoSample = 0.0f;
-    switch (lfoWaveform)
-    {
-        case 0: lfoSample = lfo.processSample(0.0f, juce::dsp::LFO<float>::Waveform::sine); break;
-        case 1: lfoSample = lfo.processSample(0.0f, juce::dsp::LFO<float>::Waveform::triangle); break;
-        case 2:
-            if (lfo_sh_clock.processSample(0.0f, juce::dsp::LFO<float>::Waveform::square) > 0.0f)
-            {
-                lfo_sh_value = random.nextFloat() * 2.0f - 1.0f;
-            }
-            lfoSample = lfo_sh_value;
-            break;
-    }
-
-    float modulatedPitch = pitch + lfoSample * lfoDepth * 24.0f;
-    pitchShifter[0].setPitch(modulatedPitch);
-    pitchShifter[1].setPitch(modulatedPitch);
-
-    float pitchRatio = std::pow(2.0f, modulatedPitch / 12.0f);
-
-    // Update filters
-    for (int i = 0; i < 2; ++i)
-    {
-        if (toneMode == 0) *postFilter[i].coefficients = *juce::dsp::IIR::Coefficients<float>::makeLowPass(sampleRate, toneCutoff, toneResonance);
-        else if (toneMode == 1) *postFilter[i].coefficients = *juce::dsp::IIR::Coefficients<float>::makeBandPass(sampleRate, toneCutoff, toneResonance);
-        else *postFilter[i].coefficients = *juce::dsp::IIR::Coefficients<float>::makeHighPass(sampleRate, toneCutoff, toneResonance);
-
-        auto noiseCutoff = std::min((sampleRate * pitchRatio) / 2.0, sampleRate / 2.0 * 0.99);
-        *noiseFilter[i].coefficients = *juce::dsp::IIR::Coefficients<float>::makeLowPass(sampleRate, noiseCutoff);
-    }
+    float lfoPhaseInc = lfoRate / sampleRate;
 
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
@@ -332,6 +295,42 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
 
         for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
         {
+            // LFO Generation
+            lfoPhase += lfoPhaseInc;
+            if (lfoPhase >= 1.0f)
+            {
+                lfoPhase -= 1.0f;
+                // New random value for S&H on phase wrap
+                lfo_sh_value = random.nextFloat() * 2.0f - 1.0f;
+            }
+
+            float lfoSample = 0.0f;
+            switch (lfoWaveform)
+            {
+                case 0: // Sine
+                    lfoSample = std::sin(lfoPhase * juce::MathConstants<float>::twoPi);
+                    break;
+                case 1: // Triangle
+                    lfoSample = 4.0f * std::abs(lfoPhase - 0.5f) - 1.0f;
+                    break;
+                case 2: // Sample & Hold
+                    lfoSample = lfo_sh_value;
+                    break;
+            }
+
+            // Processing
+            float modulatedPitch = pitch + lfoSample * lfoDepth * 24.0f;
+            pitchShifter[channel].setPitch(modulatedPitch);
+
+            float pitchRatio = std::pow(2.0f, modulatedPitch / 12.0f);
+
+            if (toneMode == 0) *postFilter[channel].coefficients = *juce::dsp::IIR::Coefficients<float>::makeLowPass(sampleRate, toneCutoff, toneResonance);
+            else if (toneMode == 1) *postFilter[channel].coefficients = *juce::dsp::IIR::Coefficients<float>::makeBandPass(sampleRate, toneCutoff, toneResonance);
+            else *postFilter[channel].coefficients = *juce::dsp::IIR::Coefficients<float>::makeHighPass(sampleRate, toneCutoff, toneResonance);
+
+            auto noiseCutoff = std::min((sampleRate * pitchRatio) / 2.0, sampleRate / 2.0 * 0.99);
+            *noiseFilter[channel].coefficients = *juce::dsp::IIR::Coefficients<float>::makeLowPass(sampleRate, noiseCutoff);
+
             float drySample = channelData[sample] * inputGain;
 
             float feedbackSample = feedbackFilter[channel].processSample(lastFeedbackOutput[channel]);

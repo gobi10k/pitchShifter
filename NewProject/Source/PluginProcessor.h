@@ -91,8 +91,7 @@ private:
     juce::dsp::IIR::Filter<float> noiseFilter[2];
 
     // LFO
-    juce::dsp::LFO<float> lfo;
-    juce::dsp::LFO<float> lfo_sh_clock;
+    float lfoPhase = 0.0f;
     float lfo_sh_value = 0.0f;
 
     // VU Meter
