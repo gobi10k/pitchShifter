@@ -98,10 +98,6 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
 
     // --- 1. Get Host Transport Information & Update Parameters ---
     playHead = getPlayHead();
-    if (!playHead || !playHead->getCurrentPosition(positionInfo))
-    {
-        return; // Can't sync, do nothing.
-    }
 
     // Update the pitch ratios for the interval voices from the parameters
     voices[1].pitchRatio = std::pow(2.0, indexToSemitones(interval1Pitch->load()) / 12.0);
@@ -109,25 +105,38 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
 
     // --- 2. Determine Active Stage & Set Voice Gains ---
     int activeStage = 0;
-    if (positionInfo.getIsPlaying())
+    if (playHead != nullptr)
     {
-        const double beatsPerBar = positionInfo.getTimeSignature()->numerator;
-        const double loopLengthsInBeats[] = { beatsPerBar * 0.5, beatsPerBar, beatsPerBar * 2.0, beatsPerBar * 4.0 };
-        const double currentLoopInBeats = loopLengthsInBeats[(int)loopLength->load()];
-        const double currentBeatInLoop = fmod(positionInfo.getPpqPosition(), currentLoopInBeats);
-        const double positionInLoopNormalized = currentBeatInLoop / currentLoopInBeats;
+        if (auto position = playHead->getPosition())
+        {
+            if (position->getIsPlaying())
+            {
+                double beatsPerBar = 4.0;
+                if (auto timeSignature = position->getTimeSignature())
+                    beatsPerBar = timeSignature->numerator;
 
-        const int divisionRatioIndex = (int)divisionRatio->load();
-        double baseEnd, int1End;
+                const double loopLengthsInBeats[] = { beatsPerBar * 0.5, beatsPerBar, beatsPerBar * 2.0, beatsPerBar * 4.0 };
+                const double currentLoopInBeats = loopLengthsInBeats[(int)loopLength->load()];
 
-        if (divisionRatioIndex == 0) { baseEnd = 0.50; int1End = 0.75; }
-        else if (divisionRatioIndex == 1) { baseEnd = 0.25; int1End = 0.75; }
-        else if (divisionRatioIndex == 2) { baseEnd = 0.25; int1End = 0.50; }
-        else { baseEnd = 1.0/3.0; int1End = 2.0/3.0; }
+                if (auto ppq = position->getPpqPosition())
+                {
+                    const double currentBeatInLoop = fmod(*ppq, currentLoopInBeats);
+                    const double positionInLoopNormalized = currentBeatInLoop / currentLoopInBeats;
 
-        if (positionInLoopNormalized < baseEnd)         activeStage = 0; // BASE
-        else if (positionInLoopNormalized < int1End)    activeStage = 1; // INTERVAL 1
-        else                                            activeStage = 2; // INTERVAL 2
+                    const int divisionRatioIndex = (int)divisionRatio->load();
+                    double baseEnd, int1End;
+
+                    if (divisionRatioIndex == 0) { baseEnd = 0.50; int1End = 0.75; }
+                    else if (divisionRatioIndex == 1) { baseEnd = 0.25; int1End = 0.75; }
+                    else if (divisionRatioIndex == 2) { baseEnd = 0.25; int1End = 0.50; }
+                    else { baseEnd = 1.0/3.0; int1End = 2.0/3.0; }
+
+                    if (positionInLoopNormalized < baseEnd)         activeStage = 0; // BASE
+                    else if (positionInLoopNormalized < int1End)    activeStage = 1; // INTERVAL 1
+                    else                                            activeStage = 2; // INTERVAL 2
+                }
+            }
+        }
     }
 
     // Set the target gain for each voice. The active voice is 1.0, others are 0.0.

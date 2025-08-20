@@ -97,8 +97,7 @@ private:
     std::array<PitchShiftVoice, 3> voices;
 
     // Sequencer variables
-    juce::AudioPlayHead* playHead;
-    juce::AudioPlayHead::CurrentPositionInfo positionInfo;
+    juce::AudioPlayHead* playHead = nullptr;
 
     // Pointers to the parameters in the APVTS for quick access.
     std::atomic<float>* interval1Pitch = nullptr;
