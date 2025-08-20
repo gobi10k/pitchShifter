@@ -165,7 +165,7 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     const float delayTimeSecs = 0.25f; // Fixed 250ms delay
     int delayInSamples = static_cast<int>(delayTimeSecs * getSampleRate());
 
-    // Create a temporary buffer to hold the delayed audio
+    // Create a temporary buffer to hold the delayed audio (non-interleaved)
     juce::AudioBuffer<float> delayedAudio;
     delayedAudio.setSize(totalNumInputChannels, bufferSize);
 
@@ -175,7 +175,6 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         int readPos = (writePosition - delayInSamples + delayBufferSize) % delayBufferSize;
         const float* delayData = delayBuffer.getReadPointer(channel);
         float* delayedAudioData = delayedAudio.getWritePointer(channel);
-
         for (int i = 0; i < bufferSize; ++i)
         {
             delayedAudioData[i] = delayData[readPos];
@@ -183,30 +182,43 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         }
     }
 
+    // Create a buffer for interleaving the delayed audio
+    juce::AudioBuffer<float> interleavedInput;
+    interleavedInput.setSize(1, bufferSize * totalNumInputChannels);
+    float* interleavedPtr = interleavedInput.getWritePointer(0);
+
+    // Manually interleave the delayed audio
+    for (int i = 0; i < bufferSize; ++i)
+    {
+        for (int channel = 0; channel < totalNumInputChannels; ++channel)
+        {
+            interleavedPtr[i * totalNumInputChannels + channel] = delayedAudio.getSample(channel, i);
+        }
+    }
+
     // Process voices and mix them into the main buffer
     buffer.clear();
-    juce::AudioBuffer<float> voiceOutput;
-    voiceOutput.setSize(totalNumInputChannels, bufferSize);
+    juce::AudioBuffer<float> interleavedOutput;
+    interleavedOutput.setSize(1, bufferSize * totalNumInputChannels);
 
     for (auto& voice : voices)
     {
         voice.update(); // Update smoothed pitch before processing
-        // Feed delayed samples to SoundTouch (non-interleaved)
-        voice.soundTouch.putSamples(delayedAudio.getArrayOfReadPointers(), bufferSize);
+        voice.soundTouch.putSamples(interleavedInput.getReadPointer(0), bufferSize);
 
         int numSamplesReceived = 0;
         do
         {
-            // Receive processed samples (non-interleaved)
-            numSamplesReceived = voice.soundTouch.receiveSamples(voiceOutput.getArrayOfWritePointers(), bufferSize);
+            numSamplesReceived = voice.soundTouch.receiveSamples(interleavedOutput.getWritePointer(0), bufferSize);
 
-            // Apply gain and add to main buffer
+            // De-interleave and add to main buffer
             for (int i = 0; i < numSamplesReceived; ++i)
             {
                 float gain = voice.gain.getNextValue();
                 for (int channel = 0; channel < totalNumInputChannels; ++channel)
                 {
-                    buffer.addSample(channel, i, voiceOutput.getSample(channel, i) * gain);
+                    float sample = interleavedOutput.getSample(0, i * totalNumInputChannels + channel);
+                    buffer.addSample(channel, i, sample * gain);
                 }
             }
         } while (numSamplesReceived != 0);
