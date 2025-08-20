@@ -16,6 +16,8 @@
 class BBD
 {
 public:
+    static constexpr int BBD_SIZE = 512;
+
     BBD();
 
     void prepare(const juce::dsp::ProcessSpec& spec);
@@ -27,8 +29,6 @@ public:
     float getReadIndex() const;
 
 private:
-    static constexpr int BBD_SIZE = 512;
-
     juce::AudioBuffer<float> delayLine;
     int writeIndex { 0 };
     float readIndex { 0.0f };
