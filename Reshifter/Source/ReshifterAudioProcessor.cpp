@@ -87,13 +87,11 @@ void ReshifterAudioProcessor::prepareToPlay (double sr, int samplesPerBlock)
     for (auto& voice : voices)
         voice.prepare(spec);
 
-    // Set the fixed pitch for the BASE voice
     voices[0].setPitch(0.0f);
 }
 
 void ReshifterAudioProcessor::releaseResources()
 {
-    delayBuffer.setSize(0, 0);
 }
 
 void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
@@ -103,7 +101,6 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     auto totalNumOutputChannels = getTotalNumOutputChannels();
     const int bufferSize = buffer.getNumSamples();
 
-    // Create a copy of the clean input buffer before we start modifying it.
     juce::AudioBuffer<float> cleanInput;
     cleanInput.makeCopyOf(buffer);
 
@@ -153,7 +150,6 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         activeStage = 1;
     }
 
-    // --- 3. Set Voice Gains ---
     const float glideTime = (currentMode == 2) ? 0.01f : glide->load();
     for (int i = 0; i < voices.size(); ++i)
     {
@@ -162,14 +158,12 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
 
     // --- 4. Process Audio ---
     const int delayBufferSize = delayBuffer.getNumSamples();
-    const float delayTimeSecs = 0.25f; // Fixed 250ms delay
+    const float delayTimeSecs = 0.25f;
     int delayInSamples = static_cast<int>(delayTimeSecs * getSampleRate());
 
-    // Create a temporary buffer to hold the delayed audio (non-interleaved)
     juce::AudioBuffer<float> delayedAudio;
     delayedAudio.setSize(totalNumInputChannels, bufferSize);
 
-    // Get the delayed audio from the main delay buffer
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
         int readPos = (writePosition - delayInSamples + delayBufferSize) % delayBufferSize;
@@ -182,43 +176,25 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         }
     }
 
-    // Create a buffer for interleaving the delayed audio
-    juce::AudioBuffer<float> interleavedInput;
-    interleavedInput.setSize(1, bufferSize * totalNumInputChannels);
-    float* interleavedPtr = interleavedInput.getWritePointer(0);
-
-    // Manually interleave the delayed audio
-    for (int i = 0; i < bufferSize; ++i)
-    {
-        for (int channel = 0; channel < totalNumInputChannels; ++channel)
-        {
-            interleavedPtr[i * totalNumInputChannels + channel] = delayedAudio.getSample(channel, i);
-        }
-    }
-
-    // Process voices and mix them into the main buffer
     buffer.clear();
-    juce::AudioBuffer<float> interleavedOutput;
-    interleavedOutput.setSize(1, bufferSize * totalNumInputChannels);
+    juce::AudioBuffer<float> voiceOutput;
+    voiceOutput.setSize(totalNumInputChannels, bufferSize);
 
     for (auto& voice : voices)
     {
-        voice.update(); // Update smoothed pitch before processing
-        voice.soundTouch.putSamples(interleavedInput.getReadPointer(0), bufferSize);
+        voice.update();
+        voice.soundTouch.putSamples_ni(delayedAudio.getArrayOfReadPointers(), bufferSize);
 
         int numSamplesReceived = 0;
         do
         {
-            numSamplesReceived = voice.soundTouch.receiveSamples(interleavedOutput.getWritePointer(0), bufferSize);
-
-            // De-interleave and add to main buffer
+            numSamplesReceived = voice.soundTouch.receiveSamples_ni(voiceOutput.getArrayOfWritePointers(), bufferSize);
             for (int i = 0; i < numSamplesReceived; ++i)
             {
                 float gain = voice.gain.getNextValue();
                 for (int channel = 0; channel < totalNumInputChannels; ++channel)
                 {
-                    float sample = interleavedOutput.getSample(0, i * totalNumInputChannels + channel);
-                    buffer.addSample(channel, i, sample * gain);
+                    buffer.addSample(channel, i, voiceOutput.getSample(channel, i) * gain);
                 }
             }
         } while (numSamplesReceived != 0);
