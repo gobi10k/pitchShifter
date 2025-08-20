@@ -14,6 +14,8 @@ ReshifterAudioProcessorEditor::ReshifterAudioProcessorEditor (ReshifterAudioProc
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
     // --- Parameter Attachments ---
+    modeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "MODE", modeSelector);
+    manualTempoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, "MANUAL_TEMPO", manualTempoSlider);
     glideAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(audioProcessor.apvts, "GLIDE", glideSlider);
     interval1PitchAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "INTERVAL1_PITCH", interval1PitchSelector);
     interval2PitchAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(audioProcessor.apvts, "INTERVAL2_PITCH", interval2PitchSelector);
@@ -24,45 +26,39 @@ ReshifterAudioProcessorEditor::ReshifterAudioProcessorEditor (ReshifterAudioProc
     glideSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     glideSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
 
+    addAndMakeVisible(manualTempoSlider);
+    manualTempoSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    manualTempoSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 20);
+
     // --- Combo Boxes ---
+    addAndMakeVisible(modeSelector);
     addAndMakeVisible(interval1PitchSelector);
     addAndMakeVisible(interval2PitchSelector);
     addAndMakeVisible(divisionRatioSelector);
 
     // --- Buttons ---
     addAndMakeVisible(loopLengthButton);
-    loopLengthButton.setButtonText("Tap");
+    loopLengthButton.setButtonText("1 bar"); // Initial Text
     loopLengthButton.addListener(this);
 
     // --- Labels ---
-    addAndMakeVisible(glideLabel);
-    glideLabel.setText("Glide", juce::dontSendNotification);
-    glideLabel.setJustificationType(juce::Justification::centred);
+    auto setupLabel = [this](juce::Label& label, const juce::String& text)
+    {
+        addAndMakeVisible(label);
+        label.setText(text, juce::dontSendNotification);
+        label.setJustificationType(juce::Justification::centred);
+        label.attachToComponent(&glideSlider, false); // This will be overridden in resized()
+    };
 
-    addAndMakeVisible(interval1Label);
-    interval1Label.setText("Interval 1", juce::dontSendNotification);
-    interval1Label.setJustificationType(juce::Justification::centred);
+    setupLabel(modeLabel, "Mode");
+    setupLabel(manualTempoLabel, "Tempo");
+    setupLabel(glideLabel, "Glide");
+    setupLabel(interval1Label, "Interval 1");
+    setupLabel(interval2Label, "Interval 2");
+    setupLabel(divisionLabel, "Division");
+    setupLabel(loopLengthLabel, "Loop Length");
 
-    addAndMakeVisible(interval2Label);
-    interval2Label.setText("Interval 2", juce::dontSendNotification);
-    interval2Label.setJustificationType(juce::Justification::centred);
-
-    addAndMakeVisible(divisionLabel);
-    divisionLabel.setText("Division", juce::dontSendNotification);
-    divisionLabel.setJustificationType(juce::Justification::centred);
-
-    addAndMakeVisible(loopLengthLabel);
-    loopLengthLabel.setText("Loop Length", juce::dontSendNotification);
-    loopLengthLabel.setJustificationType(juce::Justification::centred);
-
-    addAndMakeVisible(loopLengthValueLabel);
-    loopLengthValueLabel.setJustificationType(juce::Justification::centred);
-    // Set initial value for the loop length label
-    auto& loopLengthParam = *audioProcessor.apvts.getParameter("LOOP_LENGTH");
-    loopLengthValueLabel.setText(loopLengthParam.getText(loopLengthParam.getValue(), 0), juce::dontSendNotification);
-
-
-    setSize (300, 400);
+    setSize (400, 300);
 }
 
 ReshifterAudioProcessorEditor::~ReshifterAudioProcessorEditor()
@@ -78,30 +74,35 @@ void ReshifterAudioProcessorEditor::paint (juce::Graphics& g)
 
 void ReshifterAudioProcessorEditor::resized()
 {
-    auto bounds = getLocalBounds().reduced(10);
+    auto bounds = getLocalBounds().reduced(20);
 
-    auto topRow = bounds.removeFromTop(100);
-    glideSlider.setBounds(topRow.removeFromLeft(100));
-    interval1PitchSelector.setBounds(topRow.removeFromLeft(100));
-    interval2PitchSelector.setBounds(topRow.removeFromLeft(100));
+    auto row = bounds.removeFromTop(70);
+    modeSelector.setBounds(row.removeFromLeft(100));
+    manualTempoSlider.setBounds(row.removeFromLeft(100));
+    glideSlider.setBounds(row.removeFromLeft(100));
 
     auto labelRow = bounds.removeFromTop(20);
+    modeLabel.setBounds(labelRow.removeFromLeft(100));
+    manualTempoLabel.setBounds(labelRow.removeFromLeft(100));
     glideLabel.setBounds(labelRow.removeFromLeft(100));
+
+    bounds.removeFromTop(20);
+
+    row = bounds.removeFromTop(70);
+    interval1PitchSelector.setBounds(row.removeFromLeft(100));
+    interval2PitchSelector.setBounds(row.removeFromLeft(100));
+    divisionRatioSelector.setBounds(row.removeFromLeft(100));
+
+    labelRow = bounds.removeFromTop(20);
     interval1Label.setBounds(labelRow.removeFromLeft(100));
     interval2Label.setBounds(labelRow.removeFromLeft(100));
+    divisionLabel.setBounds(labelRow.removeFromLeft(100));
 
-    bounds.removeFromTop(20); // spacing
+    bounds.removeFromTop(20);
 
-    auto middleRow = bounds.removeFromTop(50);
-    divisionRatioSelector.setBounds(middleRow.removeFromLeft(150));
-    divisionLabel.setBounds(middleRow.translated(0, 25));
-
-    bounds.removeFromTop(20); // spacing
-
-    auto bottomRow = bounds.removeFromTop(100);
-    loopLengthButton.setBounds(bottomRow.getCentreX() - 50, bottomRow.getY(), 100, 100);
-    loopLengthLabel.setBounds(loopLengthButton.getX(), loopLengthButton.getY() - 20, 100, 20);
-    loopLengthValueLabel.setBounds(loopLengthButton.getX(), loopLengthButton.getBottom(), 100, 20);
+    auto buttonBounds = bounds.removeFromTop(50).reduced(0, 10);
+    loopLengthLabel.setBounds(buttonBounds.removeFromLeft(100));
+    loopLengthButton.setBounds(buttonBounds);
 }
 
 
@@ -110,19 +111,29 @@ void ReshifterAudioProcessorEditor::buttonClicked (juce::Button* button)
     if (button == &loopLengthButton)
     {
         auto* parameter = audioProcessor.apvts.getParameter("LOOP_LENGTH");
-        jassert(parameter != nullptr);
+        if (parameter == nullptr) return;
 
-        int currentValue = parameter->getValue();
-        int numChoices = parameter->getNumSteps();
-        int nextValue = (currentValue + 1) % numChoices;
+        auto range = parameter->getNormalisableRange();
+        int numChoices = range.end - range.start + 1;
+        if (numChoices <= 1) return;
 
-        parameter->setValueNotifyingHost(nextValue);
+        // This is tricky with APVTS. The "value" is normalized 0-1.
+        // We need to get the current index, increment it, and set the new normalized value.
+        float currentValue = parameter->getValue();
+        int currentIndex = static_cast<int>(currentValue * (numChoices - 1) + 0.5f);
 
-        loopLengthValueLabel.setText(parameter->getText(nextValue, 0), juce::dontSendNotification);
+        int nextIndex = (currentIndex + 1) % numChoices;
+
+        float nextValueNormalized = (float)nextIndex / (float)(numChoices - 1);
+
+        parameter->setValueNotifyingHost(nextValueNormalized);
+
+        // Update button text manually since there's no attachment for it
+        loopLengthButton.setButtonText(parameter->getText(nextValueNormalized, 0));
     }
 }
 
 void ReshifterAudioProcessorEditor::comboBoxChanged(juce::ComboBox* comboBox)
 {
-    // Can be used for custom logic if needed in the future
+    // Attachments handle everything, no custom logic needed for now.
 }

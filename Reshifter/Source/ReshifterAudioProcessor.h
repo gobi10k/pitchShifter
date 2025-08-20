@@ -22,6 +22,7 @@ struct PitchShiftVoice
 {
     soundtouch::SoundTouch soundTouch;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> gain;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedPitch;
     double sampleRate = 44100.0;
 
     void prepare(const juce::dsp::ProcessSpec& spec)
@@ -30,17 +31,23 @@ struct PitchShiftVoice
         soundTouch.setSampleRate(sampleRate);
         soundTouch.setChannels(spec.numChannels);
         gain.reset(sampleRate, 0.05);
+        smoothedPitch.reset(sampleRate, 0.05); // 50ms pitch smoothing
     }
 
     void setPitch(float semitones)
     {
-        soundTouch.setPitchSemiTones(semitones);
+        smoothedPitch.setTargetValue(semitones);
     }
 
     void setGain(float targetGain, float smoothTime)
     {
         gain.reset(sampleRate, smoothTime);
         gain.setTargetValue(targetGain);
+    }
+
+    void update()
+    {
+        soundTouch.setPitchSemiTones(smoothedPitch.getNextValue());
     }
 };
 

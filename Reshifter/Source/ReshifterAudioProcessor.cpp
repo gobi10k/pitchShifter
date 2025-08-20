@@ -169,13 +169,17 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     juce::AudioBuffer<float> delayedAudio;
     delayedAudio.setSize(totalNumInputChannels, bufferSize);
 
-    // Get the delayed audio
+    // Get the delayed audio from the main delay buffer
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        int readPos = writePosition - delayInSamples + delayBufferSize;
+        int readPos = (writePosition - delayInSamples + delayBufferSize) % delayBufferSize;
+        const float* delayData = delayBuffer.getReadPointer(channel);
+        float* delayedAudioData = delayedAudio.getWritePointer(channel);
+
         for (int i = 0; i < bufferSize; ++i)
         {
-            delayedAudio.setSample(channel, i, delayBuffer.getSample(channel, (readPos + i) % delayBufferSize));
+            delayedAudioData[i] = delayData[readPos];
+            readPos = (readPos + 1) % delayBufferSize;
         }
     }
 
@@ -186,20 +190,26 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
 
     for (auto& voice : voices)
     {
-        // Feed delayed samples to SoundTouch
-        voice.soundTouch.putSamples(delayedAudio.getReadPointer(0), bufferSize);
+        voice.update(); // Update smoothed pitch before processing
+        // Feed delayed samples to SoundTouch (non-interleaved)
+        voice.soundTouch.putSamples(delayedAudio.getArrayOfReadPointers(), bufferSize);
 
-        // Receive processed samples
-        int numSamplesReceived = voice.soundTouch.receiveSamples(voiceOutput.getWritePointer(0), bufferSize);
-
-        // Apply gain and add to main buffer
-        for (int channel = 0; channel < totalNumInputChannels; ++channel)
+        int numSamplesReceived = 0;
+        do
         {
+            // Receive processed samples (non-interleaved)
+            numSamplesReceived = voice.soundTouch.receiveSamples(voiceOutput.getArrayOfWritePointers(), bufferSize);
+
+            // Apply gain and add to main buffer
             for (int i = 0; i < numSamplesReceived; ++i)
             {
-                buffer.addSample(channel, i, voiceOutput.getSample(channel, i) * voice.gain.getNextValue());
+                float gain = voice.gain.getNextValue();
+                for (int channel = 0; channel < totalNumInputChannels; ++channel)
+                {
+                    buffer.addSample(channel, i, voiceOutput.getSample(channel, i) * gain);
+                }
             }
-        }
+        } while (numSamplesReceived != 0);
     }
 
     // Write clean input to delay buffer

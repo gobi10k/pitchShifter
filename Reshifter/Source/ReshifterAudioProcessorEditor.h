@@ -29,15 +29,13 @@ private:
 
     ReshifterAudioProcessor& audioProcessor;
 
-    juce::Slider glideSlider;
-    juce::ComboBox interval1PitchSelector, interval2PitchSelector, divisionRatioSelector;
+    juce::Slider glideSlider, manualTempoSlider;
+    juce::ComboBox modeSelector, interval1PitchSelector, interval2PitchSelector, divisionRatioSelector;
     juce::TextButton loopLengthButton;
-    juce::Label glideLabel, interval1Label, interval2Label, divisionLabel, loopLengthLabel, loopLengthValueLabel;
+    juce::Label glideLabel, manualTempoLabel, modeLabel, interval1Label, interval2Label, divisionLabel, loopLengthLabel, loopLengthValueLabel;
 
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> glideAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> interval1PitchAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> interval2PitchAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> divisionRatioAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> glideAttachment, manualTempoAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAttachment, interval1PitchAttachment, interval2PitchAttachment, divisionRatioAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ReshifterAudioProcessorEditor)
 };
