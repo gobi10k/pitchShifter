@@ -11,7 +11,7 @@
 #include <JuceHeader.h>
 
 #define SOUNDTOUCH_FLOAT_SAMPLES 1
-#include "SoundTouch/SoundTouch.h"
+#include "SoundTouch.h"
 
 //==============================================================================
 /**
