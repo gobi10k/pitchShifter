@@ -176,25 +176,39 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         }
     }
 
+    juce::AudioBuffer<float> interleavedInput;
+    interleavedInput.setSize(1, bufferSize * totalNumInputChannels);
+    float* interleavedPtr = interleavedInput.getWritePointer(0);
+
+    for (int i = 0; i < bufferSize; ++i)
+    {
+        for (int channel = 0; channel < totalNumInputChannels; ++channel)
+        {
+            interleavedPtr[i * totalNumInputChannels + channel] = delayedAudio.getSample(channel, i);
+        }
+    }
+
     buffer.clear();
-    juce::AudioBuffer<float> voiceOutput;
-    voiceOutput.setSize(totalNumInputChannels, bufferSize);
+    juce::AudioBuffer<float> interleavedOutput;
+    interleavedOutput.setSize(1, bufferSize * totalNumInputChannels);
 
     for (auto& voice : voices)
     {
         voice.update();
-        voice.soundTouch.putSamples_ni(delayedAudio.getArrayOfReadPointers(), bufferSize);
+        voice.soundTouch.putSamples(interleavedInput.getReadPointer(0), bufferSize);
 
         int numSamplesReceived = 0;
         do
         {
-            numSamplesReceived = voice.soundTouch.receiveSamples_ni(voiceOutput.getArrayOfWritePointers(), bufferSize);
+            numSamplesReceived = voice.soundTouch.receiveSamples(interleavedOutput.getWritePointer(0), bufferSize);
+
             for (int i = 0; i < numSamplesReceived; ++i)
             {
                 float gain = voice.gain.getNextValue();
                 for (int channel = 0; channel < totalNumInputChannels; ++channel)
                 {
-                    buffer.addSample(channel, i, voiceOutput.getSample(channel, i) * gain);
+                    float sample = interleavedOutput.getSample(0, i * totalNumInputChannels + channel);
+                    buffer.addSample(channel, i, sample * gain);
                 }
             }
         } while (numSamplesReceived != 0);
