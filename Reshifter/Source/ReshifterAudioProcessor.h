@@ -25,17 +25,19 @@ struct PitchShiftVoice
 
     // The pitch ratio for this voice (e.g., 1.0 for unison, 1.5 for a fifth up).
     double pitchRatio = 1.0;
+    double sampleRate = 44100.0;
 
     void prepare(const juce::dsp::ProcessSpec& spec)
     {
+        sampleRate = spec.sampleRate;
         readPosition.resize(spec.numChannels);
         std::fill(readPosition.begin(), readPosition.end(), 0.0);
-        gain.reset(spec.sampleRate, 0.05);
+        gain.reset(sampleRate, 0.05);
     }
 
     void setGain(double targetGain, double smoothTime)
     {
-        gain.setSmoothTime(smoothTime);
+        gain.reset(sampleRate, smoothTime);
         gain.setTargetValue(targetGain);
     }
 };
