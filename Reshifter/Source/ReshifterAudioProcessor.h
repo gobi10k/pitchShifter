@@ -10,6 +10,9 @@
 
 #include <JuceHeader.h>
 
+#define SOUNDTOUCH_FLOAT_SAMPLES 1
+#include "SoundTouch/SoundTouch.h"
+
 //==============================================================================
 /**
 */
@@ -17,28 +20,30 @@
 // A dedicated struct to hold the state of a single pitch-shifting voice.
 struct PitchShiftVoice
 {
-    // Each voice has its own independent read position in the shared delay buffer.
-    std::vector<double> readPosition;
-
-    // Each voice has its own smoothed gain, allowing for smooth crossfades.
-    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear> gain;
-
-    // The pitch ratio for this voice (e.g., 1.0 for unison, 1.5 for a fifth up).
-    double pitchRatio = 1.0;
-    double sampleRate = 44100.0;
+    soundtouch::SoundTouch soundTouch;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> gain;
 
     void prepare(const juce::dsp::ProcessSpec& spec)
     {
-        sampleRate = spec.sampleRate;
-        readPosition.resize(spec.numChannels);
-        std::fill(readPosition.begin(), readPosition.end(), 0.0);
-        gain.reset(sampleRate, 0.05);
+        soundTouch.setSampleRate(spec.sampleRate);
+        soundTouch.setChannels(spec.numChannels);
+        gain.reset(spec.sampleRate, 0.05);
     }
 
-    void setGain(double targetGain, double smoothTime)
+    void setPitch(float semitones)
     {
-        gain.reset(sampleRate, smoothTime);
+        soundTouch.setPitchSemiTones(semitones);
+    }
+
+    void setGain(float targetGain, float smoothTime)
+    {
+        gain.reset(getSampleRate(), smoothTime);
         gain.setTargetValue(targetGain);
+    }
+
+    double getSampleRate() const
+    {
+        return soundTouch.getSampleRate();
     }
 };
 
