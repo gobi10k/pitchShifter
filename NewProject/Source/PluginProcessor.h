@@ -8,17 +8,35 @@
 
 #pragma once
 
+#include "PitchShifter.h"
 #include <JuceHeader.h>
 
 //==============================================================================
 /**
 */
-class NewProjectAudioProcessor  : public juce::AudioProcessor
+class PitchShiftAudioProcessor  : public juce::AudioProcessor
 {
 public:
+    enum Presets
+    {
+        Default,
+        AnalogDoubler,
+        ChorusEnsemble,
+        OctaveUp,
+        Vibrato,
+        ResonantSwell,
+        LoFiWarble,
+        NumPresets
+    };
+
     //==============================================================================
-    NewProjectAudioProcessor();
-    ~NewProjectAudioProcessor() override;
+    PitchShiftAudioProcessor();
+    ~PitchShiftAudioProcessor() override;
+
+    juce::AudioProcessorValueTreeState& getAPVTS();
+    float getRMSLevel(int channel) const;
+
+    void loadPreset(int presetIndex);
 
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
@@ -55,5 +73,29 @@ public:
 
 private:
     //==============================================================================
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NewProjectAudioProcessor)
+    juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    juce::AudioProcessorValueTreeState apvts;
+
+    PitchShifter pitchShifter[2];
+
+    // Feedback Path
+    float lastFeedbackOutput[2] { 0.0f, 0.0f };
+    juce::dsp::IIR::Filter<float> feedbackFilter[2];
+
+    // Post Filter
+    juce::dsp::IIR::Filter<float> postFilter[2];
+
+    // Noise
+    juce::Random random;
+    juce::dsp::IIR::Filter<float> noiseFilter[2];
+
+    // LFO
+    juce::dsp::LFO<float> lfo;
+    juce::dsp::LFO<float> lfo_sh_clock;
+    float lfo_sh_value = 0.0f;
+
+    // VU Meter
+    float rmsLevel[2] { -60.0f, -60.0f };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PitchShiftAudioProcessor)
 };
