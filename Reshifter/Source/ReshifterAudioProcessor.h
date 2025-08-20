@@ -98,8 +98,12 @@ private:
 
     // Sequencer variables
     juce::AudioPlayHead* playHead = nullptr;
+    double currentBpm = 120.0;
+    double freeRunningPpq = 0.0;
 
     // Pointers to the parameters in the APVTS for quick access.
+    std::atomic<float>* mode = nullptr;
+    std::atomic<float>* manualTempo = nullptr;
     std::atomic<float>* interval1Pitch = nullptr;
     std::atomic<float>* interval2Pitch = nullptr;
     std::atomic<float>* loopLength = nullptr;

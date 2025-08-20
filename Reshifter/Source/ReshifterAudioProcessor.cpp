@@ -38,6 +38,8 @@ ReshifterAudioProcessor::ReshifterAudioProcessor()
 #endif
 apvts(*this, nullptr, "Parameters", createParameterLayout())
 {
+    mode = apvts.getRawParameterValue("MODE");
+    manualTempo = apvts.getRawParameterValue("MANUAL_TEMPO");
     interval1Pitch = apvts.getRawParameterValue("INTERVAL1_PITCH");
     interval2Pitch = apvts.getRawParameterValue("INTERVAL2_PITCH");
     loopLength = apvts.getRawParameterValue("LOOP_LENGTH");
@@ -52,14 +54,22 @@ ReshifterAudioProcessor::~ReshifterAudioProcessor()
 juce::AudioProcessorValueTreeState::ParameterLayout ReshifterAudioProcessor::createParameterLayout()
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+
+    params.push_back(std::make_unique<juce::AudioParameterChoice>("MODE", "Mode", juce::StringArray{"Sync", "Manual", "Pitch"}, 0));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>("MANUAL_TEMPO", "Manual Tempo", juce::NormalisableRange<float>(40.0f, 240.0f, 0.1f), 120.0f));
+
     juce::StringArray intervalChoices { "-24", "-19", "-17", "-12", "-7", "-5", "0", "+5", "+7", "+12", "+17", "+19", "+24" };
     params.push_back(std::make_unique<juce::AudioParameterChoice>("INTERVAL1_PITCH", "Interval 1 Pitch", intervalChoices, 6));
     params.push_back(std::make_unique<juce::AudioParameterChoice>("INTERVAL2_PITCH", "Interval 2 Pitch", intervalChoices, 8));
+
     juce::StringArray loopLengthChoices { "1/2 bar", "1 bar", "2 bars", "4 bars" };
     params.push_back(std::make_unique<juce::AudioParameterChoice>("LOOP_LENGTH", "Loop Length", loopLengthChoices, 1));
+
     juce::StringArray divisionRatioChoices { "50/25/25", "25/50/25", "25/25/50", "33/33/33" };
     params.push_back(std::make_unique<juce::AudioParameterChoice>("DIVISION_RATIO", "Division Ratio", divisionRatioChoices, 0));
+
     params.push_back(std::make_unique<juce::AudioParameterFloat>("GLIDE", "Glide", juce::NormalisableRange<float>(0.01f, 2.0f, 0.01f), 0.5f));
+
     return { params.begin(), params.end() };
 }
 
@@ -104,44 +114,76 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     voices[2].pitchRatio = std::pow(2.0, indexToSemitones(interval2Pitch->load()) / 12.0);
 
     // --- 2. Determine Active Stage & Set Voice Gains ---
+    auto currentMode = (int)mode->load();
     int activeStage = 0;
-    if (playHead != nullptr)
+
+    // Get host transport info
+    auto position = playHead != nullptr ? playHead->getPosition() : juce::nullopt;
+
+    // Determine current BPM
+    if (currentMode == 1) // Manual Mode
     {
-        if (auto position = playHead->getPosition())
-        {
-            if (position->getIsPlaying())
-            {
-                double beatsPerBar = 4.0;
-                if (auto timeSignature = position->getTimeSignature())
-                    beatsPerBar = timeSignature->numerator;
-
-                const double loopLengthsInBeats[] = { beatsPerBar * 0.5, beatsPerBar, beatsPerBar * 2.0, beatsPerBar * 4.0 };
-                const double currentLoopInBeats = loopLengthsInBeats[(int)loopLength->load()];
-
-                if (auto ppq = position->getPpqPosition())
-                {
-                    const double currentBeatInLoop = fmod(*ppq, currentLoopInBeats);
-                    const double positionInLoopNormalized = currentBeatInLoop / currentLoopInBeats;
-
-                    const int divisionRatioIndex = (int)divisionRatio->load();
-                    double baseEnd, int1End;
-
-                    if (divisionRatioIndex == 0) { baseEnd = 0.50; int1End = 0.75; }
-                    else if (divisionRatioIndex == 1) { baseEnd = 0.25; int1End = 0.75; }
-                    else if (divisionRatioIndex == 2) { baseEnd = 0.25; int1End = 0.50; }
-                    else { baseEnd = 1.0/3.0; int1End = 2.0/3.0; }
-
-                    if (positionInLoopNormalized < baseEnd)         activeStage = 0; // BASE
-                    else if (positionInLoopNormalized < int1End)    activeStage = 1; // INTERVAL 1
-                    else                                            activeStage = 2; // INTERVAL 2
-                }
-            }
-        }
+        currentBpm = manualTempo->load();
+    }
+    else // Sync or Pitch Mode
+    {
+        if (position && position->getBpm())
+            currentBpm = *position->getBpm();
     }
 
-    // Set the target gain for each voice. The active voice is 1.0, others are 0.0.
-    // The 'glide' parameter controls the crossfade time between them.
-    const double glideTime = glide->load();
+    // Sequencer logic
+    if (currentMode < 2) // Sync or Manual Mode
+    {
+        double ppq = 0.0;
+        bool isPlaying = false;
+
+        if (position && position->getIsPlaying())
+        {
+            isPlaying = true;
+            if (position->getPpqPosition())
+                ppq = *position->getPpqPosition();
+        }
+
+        if (!isPlaying) // Host not playing, or no host -> use free-running counter
+        {
+            const double beatsPerSample = currentBpm / (getSampleRate() * 60.0);
+            const double ppqPerSample = beatsPerSample; // 1 beat = 1 quarter note
+            freeRunningPpq += buffer.getNumSamples() * ppqPerSample;
+            ppq = freeRunningPpq;
+        }
+
+        double beatsPerBar = 4.0;
+        if (position && position->getTimeSignature())
+            beatsPerBar = position->getTimeSignature()->numerator;
+
+        const double loopLengthsInBeats[] = { beatsPerBar * 0.5, beatsPerBar, beatsPerBar * 2.0, beatsPerBar * 4.0 };
+        const double currentLoopInBeats = loopLengthsInBeats[(int)loopLength->load()];
+
+        if (currentLoopInBeats > 0)
+            freeRunningPpq = fmod(freeRunningPpq, currentLoopInBeats);
+
+        const double currentBeatInLoop = fmod(ppq, currentLoopInBeats);
+        const double positionInLoopNormalized = currentBeatInLoop / currentLoopInBeats;
+
+        const int divisionRatioIndex = (int)divisionRatio->load();
+        double baseEnd, int1End;
+
+        if (divisionRatioIndex == 0) { baseEnd = 0.50; int1End = 0.75; }
+        else if (divisionRatioIndex == 1) { baseEnd = 0.25; int1End = 0.75; }
+        else if (divisionRatioIndex == 2) { baseEnd = 0.25; int1End = 0.50; }
+        else { baseEnd = 1.0/3.0; int1End = 2.0/3.0; }
+
+        if (positionInLoopNormalized < baseEnd)         activeStage = 0;
+        else if (positionInLoopNormalized < int1End)    activeStage = 1;
+        else                                            activeStage = 2;
+    }
+    else // Pitch Mode
+    {
+        activeStage = 1; // Always use Interval 1 voice
+    }
+
+    // --- 3. Set Voice Gains ---
+    const double glideTime = (currentMode == 2) ? 0.01 : glide->load(); // Fast glide in Pitch mode
     for (int i = 0; i < voices.size(); ++i)
     {
         voices[i].setGain((i == activeStage) ? 1.0 : 0.0, glideTime);
