@@ -8,8 +8,9 @@
 
 #pragma once
 
-#include "PitchShifter.h"
 #include <JuceHeader.h>
+#include <juce_dsp/juce_dsp.h>
+#include "PitchShifter.h"
 
 //==============================================================================
 /**
