@@ -10,9 +10,6 @@
 
 #include <JuceHeader.h>
 
-#define SOUNDTOUCH_FLOAT_SAMPLES 1
-#include "SoundTouch.h"
-
 //==============================================================================
 /**
 */
@@ -20,38 +17,23 @@
 // A dedicated struct to hold the state of a single pitch-shifting voice.
 struct PitchShiftVoice
 {
-    soundtouch::SoundTouch soundTouch;
+    std::vector<double> readPosition;
     juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> gain;
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedPitch;
+    double pitchRatio = 1.0;
     double sampleRate = 44100.0;
 
     void prepare(const juce::dsp::ProcessSpec& spec)
     {
         sampleRate = spec.sampleRate;
-        soundTouch.setSampleRate(sampleRate);
-        soundTouch.setChannels(spec.numChannels);
+        readPosition.resize(spec.numChannels);
+        std::fill(readPosition.begin(), readPosition.end(), 0.0);
         gain.reset(sampleRate, 0.05);
-        smoothedPitch.reset(sampleRate, 0.05); // 50ms pitch smoothing
-    }
-
-    void setPitch(float semitones)
-    {
-        if (std::abs(semitones - smoothedPitch.getTargetValue()) > 0.01f)
-        {
-            soundTouch.clear();
-            smoothedPitch.setTargetValue(semitones);
-        }
     }
 
     void setGain(float targetGain, float smoothTime)
     {
         gain.reset(sampleRate, smoothTime);
         gain.setTargetValue(targetGain);
-    }
-
-    void update()
-    {
-        soundTouch.setPitchSemiTones(smoothedPitch.getNextValue());
     }
 };
 
@@ -113,6 +95,9 @@ private:
     juce::AudioPlayHead* playHead = nullptr;
     double currentBpm = 120.0;
     double freeRunningPpq = 0.0;
+    bool wasPlaying = false;
+
+    juce::dsp::LadderFilter<float> filter;
 
     // Pointers to the parameters in the APVTS for quick access.
     std::atomic<float>* mode = nullptr;
