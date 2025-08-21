@@ -78,6 +78,7 @@ void ReshifterAudioProcessor::prepareToPlay (double sr, int samplesPerBlock)
 {
     const juce::dsp::ProcessSpec spec { sr, (juce::uint32)samplesPerBlock, (juce::uint32)getTotalNumOutputChannels() };
 
+    // Set a max delay buffer size based on 4 bars at the slowest likely tempo (e.g. 40bpm)
     const double maxLoopDurationSeconds = (4.0 * 4.0 * 60.0) / 40.0;
     const int maxDelayBufferSize = static_cast<int>((maxLoopDurationSeconds + 2.0) * spec.sampleRate);
 
@@ -87,6 +88,7 @@ void ReshifterAudioProcessor::prepareToPlay (double sr, int samplesPerBlock)
     for (auto& voice : voices)
         voice.prepare(spec);
 
+    // Set the fixed pitch for the BASE voice
     voices[0].setPitch(0.0f);
 }
 
@@ -101,55 +103,73 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     auto totalNumOutputChannels = getTotalNumOutputChannels();
     const int bufferSize = buffer.getNumSamples();
 
+    // Create a copy of the clean input buffer before we start modifying it.
     juce::AudioBuffer<float> cleanInput;
     cleanInput.makeCopyOf(buffer);
 
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, bufferSize);
 
-    // --- 1. Update Parameters ---
+    // --- 1. Update Parameters & Get Host Info ---
+    playHead = getPlayHead();
     voices[1].setPitch(indexToSemitones(interval1Pitch->load()));
     voices[2].setPitch(indexToSemitones(interval2Pitch->load()));
 
-    // --- 2. Determine Active Stage & Set Voice Gains ---
+    // --- 2. Determine Sequencer State (BPM and Position) ---
     auto currentMode = (int)mode->load();
     int activeStage = 0;
     auto position = playHead != nullptr ? playHead->getPosition() : juce::nullopt;
 
-    if (currentMode == 1) { currentBpm = manualTempo->load(); }
-    else if (position && position->getBpm()) { currentBpm = *position->getBpm(); }
+    // Determine current BPM based on mode
+    if (currentMode == 1) // Manual Mode
+    {
+        currentBpm = manualTempo->load();
+    }
+    else // Sync or Pitch Mode - use host BPM if available
+    {
+        if (position && position->getBpm())
+            currentBpm = *position->getBpm();
+    }
 
+    // Determine current position in the sequence
     if (currentMode < 2) // Sync or Manual Mode
     {
         double ppq = 0.0;
+        // If host is playing, use its position. Otherwise, use our free-running counter.
         if (position && position->getIsPlaying() && position->getPpqPosition()) {
             ppq = *position->getPpqPosition();
         } else {
-            freeRunningPpq += bufferSize * (currentBpm / (getSampleRate() * 60.0));
+            double beatsPerSample = currentBpm / (getSampleRate() * 60.0);
+            freeRunningPpq += bufferSize * beatsPerSample;
             ppq = freeRunningPpq;
         }
 
+        // Calculate current position within the loop (0.0 to 1.0)
         double beatsPerBar = (position && position->getTimeSignature()) ? (double)position->getTimeSignature()->numerator : 4.0;
         const double loopLengthsInBeats[] = { beatsPerBar * 0.5, beatsPerBar, beatsPerBar * 2.0, beatsPerBar * 4.0 };
         const double currentLoopInBeats = loopLengthsInBeats[(int)loopLength->load()];
         if (currentLoopInBeats > 0) freeRunningPpq = fmod(freeRunningPpq, currentLoopInBeats);
 
         const double positionInLoopNormalized = fmod(ppq, currentLoopInBeats) / currentLoopInBeats;
+
+        // Map the normalized position to one of the three stages based on the division ratio
         const int divisionRatioIndex = (int)divisionRatio->load();
         double baseEnd, int1End;
 
-        if (divisionRatioIndex == 0) { baseEnd = 0.50; int1End = 0.75; }
-        else if (divisionRatioIndex == 1) { baseEnd = 0.25; int1End = 0.75; }
-        else if (divisionRatioIndex == 2) { baseEnd = 0.25; int1End = 0.50; }
-        else { baseEnd = 1.0/3.0; int1End = 2.0/3.0; }
+        if (divisionRatioIndex == 0)      { baseEnd = 0.50; int1End = 0.75; } // 50/25/25
+        else if (divisionRatioIndex == 1) { baseEnd = 0.25; int1End = 0.75; } // 25/50/25
+        else if (divisionRatioIndex == 2) { baseEnd = 0.25; int1End = 0.50; } // 25/25/50
+        else                              { baseEnd = 1.0/3.0; int1End = 2.0/3.0; } // 33/33/33
 
         if (positionInLoopNormalized < baseEnd) activeStage = 0;
         else if (positionInLoopNormalized < int1End) activeStage = 1;
         else activeStage = 2;
-    } else { // Pitch Mode
+    } else { // Pitch Mode - sequencer is bypassed, always use Interval 1
         activeStage = 1;
     }
 
+    // --- 3. Set Voice Gains ---
+    // In Pitch mode, glide is very fast to ensure an immediate transition.
     const float glideTime = (currentMode == 2) ? 0.01f : glide->load();
     for (int i = 0; i < voices.size(); ++i)
     {
@@ -158,12 +178,15 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
 
     // --- 4. Process Audio ---
     const int delayBufferSize = delayBuffer.getNumSamples();
+    // NOTE: Delay time is fixed for now. For variable delay, this read logic would
+    // need interpolation (e.g. juce::dsp::LagrangeInterpolator).
     const float delayTimeSecs = 0.25f;
     int delayInSamples = static_cast<int>(delayTimeSecs * getSampleRate());
 
     juce::AudioBuffer<float> delayedAudio;
     delayedAudio.setSize(totalNumInputChannels, bufferSize);
 
+    // Get a block of delayed audio from the main delay buffer
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
         int readPos = (writePosition - delayInSamples + delayBufferSize) % delayBufferSize;
@@ -176,6 +199,7 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         }
     }
 
+    // Create a temporary buffer for interleaving audio for SoundTouch
     juce::AudioBuffer<float> interleavedInput;
     interleavedInput.setSize(1, bufferSize * totalNumInputChannels);
     float* interleavedPtr = interleavedInput.getWritePointer(0);
@@ -188,20 +212,24 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         }
     }
 
+    // Process each voice and mix the results into the main output buffer
     buffer.clear();
     juce::AudioBuffer<float> interleavedOutput;
     interleavedOutput.setSize(1, bufferSize * totalNumInputChannels);
 
     for (auto& voice : voices)
     {
-        voice.update();
+        voice.update(); // Update smoothed pitch
         voice.soundTouch.putSamples(interleavedInput.getReadPointer(0), bufferSize);
 
         int numSamplesReceived = 0;
+        // The do-while loop handles SoundTouch's internal buffering, ensuring the
+        // entire output is drained on each block.
         do
         {
             numSamplesReceived = voice.soundTouch.receiveSamples(interleavedOutput.getWritePointer(0), bufferSize);
 
+            // De-interleave the processed audio and add it to the main buffer, applying gain
             for (int i = 0; i < numSamplesReceived; ++i)
             {
                 float gain = voice.gain.getNextValue();
@@ -214,7 +242,7 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         } while (numSamplesReceived != 0);
     }
 
-    // Write clean input to delay buffer
+    // --- 5. Write clean input to delay buffer ---
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
         const float* inputData = cleanInput.getReadPointer(channel);

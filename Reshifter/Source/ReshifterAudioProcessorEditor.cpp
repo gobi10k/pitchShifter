@@ -38,7 +38,6 @@ ReshifterAudioProcessorEditor::ReshifterAudioProcessorEditor (ReshifterAudioProc
 
     // --- Buttons ---
     addAndMakeVisible(loopLengthButton);
-    loopLengthButton.setButtonText("1 bar"); // Initial Text
     loopLengthButton.addListener(this);
 
     // --- Labels ---
@@ -47,7 +46,6 @@ ReshifterAudioProcessorEditor::ReshifterAudioProcessorEditor (ReshifterAudioProc
         addAndMakeVisible(label);
         label.setText(text, juce::dontSendNotification);
         label.setJustificationType(juce::Justification::centred);
-        label.attachToComponent(&glideSlider, false); // This will be overridden in resized()
     };
 
     setupLabel(modeLabel, "Mode");
@@ -59,10 +57,12 @@ ReshifterAudioProcessorEditor::ReshifterAudioProcessorEditor (ReshifterAudioProc
     setupLabel(loopLengthLabel, "Loop Length");
 
     setSize (400, 300);
+    startTimerHz(30);
 }
 
 ReshifterAudioProcessorEditor::~ReshifterAudioProcessorEditor()
 {
+    stopTimer();
     loopLengthButton.removeListener(this);
 }
 
@@ -114,11 +114,9 @@ void ReshifterAudioProcessorEditor::buttonClicked (juce::Button* button)
         if (parameter == nullptr) return;
 
         auto range = parameter->getNormalisableRange();
-        int numChoices = range.end - range.start + 1;
+        int numChoices = range.end - range.start + 1; // Assuming choices are 0, 1, 2...
         if (numChoices <= 1) return;
 
-        // This is tricky with APVTS. The "value" is normalized 0-1.
-        // We need to get the current index, increment it, and set the new normalized value.
         float currentValue = parameter->getValue();
         int currentIndex = static_cast<int>(currentValue * (numChoices - 1) + 0.5f);
 
@@ -127,13 +125,23 @@ void ReshifterAudioProcessorEditor::buttonClicked (juce::Button* button)
         float nextValueNormalized = (float)nextIndex / (float)(numChoices - 1);
 
         parameter->setValueNotifyingHost(nextValueNormalized);
-
-        // Update button text manually since there's no attachment for it
-        loopLengthButton.setButtonText(parameter->getText(nextValueNormalized, 0));
     }
 }
 
 void ReshifterAudioProcessorEditor::comboBoxChanged(juce::ComboBox* comboBox)
 {
-    // Attachments handle everything, no custom logic needed for now.
+}
+
+void ReshifterAudioProcessorEditor::timerCallback()
+{
+    auto* parameter = audioProcessor.apvts.getParameter("LOOP_LENGTH");
+    if (parameter == nullptr) return;
+
+    float currentValue = parameter->getValue();
+    juce::String newText = parameter->getText(currentValue, 0);
+
+    if (loopLengthButton.getButtonText() != newText)
+    {
+        loopLengthButton.setButtonText(newText);
+    }
 }

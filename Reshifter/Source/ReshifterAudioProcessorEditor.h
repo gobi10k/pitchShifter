@@ -13,7 +13,7 @@
 //==============================================================================
 /**
 */
-class ReshifterAudioProcessorEditor  : public juce::AudioProcessorEditor, private juce::Button::Listener, private juce::ComboBox::Listener
+class ReshifterAudioProcessorEditor  : public juce::AudioProcessorEditor, public juce::Timer, private juce::Button::Listener, private juce::ComboBox::Listener
 {
 public:
     ReshifterAudioProcessorEditor (ReshifterAudioProcessor&);
@@ -22,6 +22,7 @@ public:
     //==============================================================================
     void paint (juce::Graphics&) override;
     void resized() override;
+    void timerCallback() override;
 
 private:
     void buttonClicked (juce::Button* button) override;
