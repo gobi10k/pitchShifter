@@ -13,6 +13,22 @@
       <FILE id="wLzZAJ" name="ReshifterAudioProcessorEditor.h" compile="0" resource="0"
             file="Source/ReshifterAudioProcessorEditor.h"/>
     </GROUP>
+    <GROUP id="{153E8A44-2345-4423-B872-012345ABCDEF}" name="SoundTouch">
+      <FILE id="st_AAFilter" name="AAFilter.cpp" compile="1" resource="0" file="Source/soundtouch/source/SoundTouch/AAFilter.cpp"/>
+      <FILE id="st_BPMDetect" name="BPMDetect.cpp" compile="1" resource="0" file="Source/soundtouch/source/SoundTouch/BPMDetect.cpp"/>
+      <FILE id="st_FIFOSampleBuffer" name="FIFOSampleBuffer.cpp" compile="1" resource="0" file="Source/soundtouch/source/SoundTouch/FIFOSampleBuffer.cpp"/>
+      <FILE id="st_FIRFilter" name="FIRFilter.cpp" compile="1" resource="0" file="Source/soundtouch/source/SoundTouch/FIRFilter.cpp"/>
+      <FILE id="st_InterpolateCubic" name="InterpolateCubic.cpp" compile="1" resource="0" file="Source/soundtouch/source/SoundTouch/InterpolateCubic.cpp"/>
+      <FILE id="st_InterpolateLinear" name="InterpolateLinear.cpp" compile="1" resource="0" file="Source/soundtouch/source/SoundTouch/InterpolateLinear.cpp"/>
+      <FILE id="st_InterpolateShannon" name="InterpolateShannon.cpp" compile="1" resource="0" file="Source/soundtouch/source/SoundTouch/InterpolateShannon.cpp"/>
+      <FILE id="st_PeakFinder" name="PeakFinder.cpp" compile="1" resource="0" file="Source/soundtouch/source/SoundTouch/PeakFinder.cpp"/>
+      <FILE id="st_RateTransposer" name="RateTransposer.cpp" compile="1" resource="0" file="Source/soundtouch/source/SoundTouch/RateTransposer.cpp"/>
+      <FILE id="st_SoundTouch" name="SoundTouch.cpp" compile="1" resource="0" file="Source/soundtouch/source/SoundTouch/SoundTouch.cpp"/>
+      <FILE id="st_TDStretch" name="TDStretch.cpp" compile="1" resource="0" file="Source/soundtouch/source/SoundTouch/TDStretch.cpp"/>
+      <FILE id="st_cpu_detect" name="cpu_detect_x86.cpp" compile="1" resource="0" file="Source/soundtouch/source/SoundTouch/cpu_detect_x86.cpp"/>
+      <FILE id="st_mmx" name="mmx_optimized.cpp" compile="1" resource="0" file="Source/soundtouch/source/SoundTouch/mmx_optimized.cpp"/>
+      <FILE id="st_sse" name="sse_optimized.cpp" compile="1" resource="0" file="Source/soundtouch/source/SoundTouch/sse_optimized.cpp"/>
+    </GROUP>
   </MAINGROUP>
   <MODULES>
     <MODULE id="juce_audio_basics" showAllCode="1" useLocalCopy="0" useGlobalPath="1"/>
@@ -34,8 +50,8 @@
   <EXPORTFORMATS>
     <XCODE_MAC targetFolder="Builds/MacOSX">
       <CONFIGURATIONS>
-        <CONFIGURATION isDebug="1" name="Debug" targetName="Reshifter"/>
-        <CONFIGURATION isDebug="0" name="Release" targetName="Reshifter"/>
+        <CONFIGURATION isDebug="1" name="Debug" targetName="Reshifter" extraCompilerFlags="-I../../Source/soundtouch/include"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="Reshifter" extraCompilerFlags="-I../../Source/soundtouch/include"/>
       </CONFIGURATIONS>
       <MODULEPATHS>
         <MODULEPATH id="juce_audio_basics" path="../../JUCE/modules"/>

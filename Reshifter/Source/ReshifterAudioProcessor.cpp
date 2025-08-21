@@ -87,7 +87,7 @@ void ReshifterAudioProcessor::prepareToPlay (double sr, int samplesPerBlock)
     for (auto& voice : voices)
         voice.prepare(spec);
 
-    voices[0].pitchRatio = 1.0;
+    voices[0].setPitch(0.0f);
 }
 
 void ReshifterAudioProcessor::releaseResources()
@@ -108,8 +108,8 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         buffer.clear (i, 0, bufferSize);
 
     // --- 1. Update Parameters ---
-    voices[1].pitchRatio = std::pow(2.0, indexToSemitones(interval1Pitch->load()) / 12.0);
-    voices[2].pitchRatio = std::pow(2.0, indexToSemitones(interval2Pitch->load()) / 12.0);
+    voices[1].setPitch(indexToSemitones(interval1Pitch->load()));
+    voices[2].setPitch(indexToSemitones(interval2Pitch->load()));
 
     // --- 2. Determine Active Stage & Set Voice Gains ---
     auto currentMode = (int)mode->load();
@@ -156,41 +156,65 @@ void ReshifterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         voices[i].setGain((i == activeStage) ? 1.0f : 0.0f, glideTime);
     }
 
-    // --- 3. Process Audio (Original Resampling Method) ---
+    // --- 4. Process Audio ---
     const int delayBufferSize = delayBuffer.getNumSamples();
-    juce::AudioBuffer<float> voiceOutputs;
-    voiceOutputs.setSize(totalNumInputChannels, bufferSize);
-    voiceOutputs.clear();
+    const float delayTimeSecs = 0.25f;
+    int delayInSamples = static_cast<int>(delayTimeSecs * getSampleRate());
 
-    for (auto& voice : voices)
+    juce::AudioBuffer<float> delayedAudio;
+    delayedAudio.setSize(totalNumInputChannels, bufferSize);
+
+    for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
-        for (int channel = 0; channel < totalNumInputChannels; ++channel)
+        int readPos = (writePosition - delayInSamples + delayBufferSize) % delayBufferSize;
+        const float* delayData = delayBuffer.getReadPointer(channel);
+        float* delayedAudioData = delayedAudio.getWritePointer(channel);
+        for (int i = 0; i < bufferSize; ++i)
         {
-            auto* outputData = voiceOutputs.getWritePointer(channel);
-            const float* delayData = delayBuffer.getReadPointer(channel);
-            double currentReadPos = voice.readPosition[channel];
-
-            for (int i = 0; i < bufferSize; ++i)
-            {
-                auto readPosInt = static_cast<int>(currentReadPos);
-                auto readPosNext = (readPosInt + 1) % delayBufferSize;
-                auto frac = currentReadPos - readPosInt;
-                auto interpolatedSample = (1.0 - frac) * delayData[readPosInt] + frac * delayData[readPosNext];
-
-                const float currentGain = voice.gain.getNextValue();
-                outputData[i] += interpolatedSample * currentGain;
-
-                currentReadPos += voice.pitchRatio;
-                if (currentReadPos >= delayBufferSize)
-                    currentReadPos -= delayBufferSize;
-            }
-            voice.readPosition[channel] = currentReadPos;
+            delayedAudioData[i] = delayData[readPos];
+            readPos = (readPos + 1) % delayBufferSize;
         }
     }
 
-    buffer.makeCopyOf(voiceOutputs);
+    juce::AudioBuffer<float> interleavedInput;
+    interleavedInput.setSize(1, bufferSize * totalNumInputChannels);
+    float* interleavedPtr = interleavedInput.getWritePointer(0);
 
-    // --- 4. Write clean input to delay buffer ---
+    for (int i = 0; i < bufferSize; ++i)
+    {
+        for (int channel = 0; channel < totalNumInputChannels; ++channel)
+        {
+            interleavedPtr[i * totalNumInputChannels + channel] = delayedAudio.getSample(channel, i);
+        }
+    }
+
+    buffer.clear();
+    juce::AudioBuffer<float> interleavedOutput;
+    interleavedOutput.setSize(1, bufferSize * totalNumInputChannels);
+
+    for (auto& voice : voices)
+    {
+        voice.update();
+        voice.soundTouch.putSamples(interleavedInput.getReadPointer(0), bufferSize);
+
+        int numSamplesReceived = 0;
+        do
+        {
+            numSamplesReceived = voice.soundTouch.receiveSamples(interleavedOutput.getWritePointer(0), bufferSize);
+
+            for (int i = 0; i < numSamplesReceived; ++i)
+            {
+                float gain = voice.gain.getNextValue();
+                for (int channel = 0; channel < totalNumInputChannels; ++channel)
+                {
+                    float sample = interleavedOutput.getSample(0, i * totalNumInputChannels + channel);
+                    buffer.addSample(channel, i, sample * gain);
+                }
+            }
+        } while (numSamplesReceived != 0);
+    }
+
+    // Write clean input to delay buffer
     for (int channel = 0; channel < totalNumInputChannels; ++channel)
     {
         const float* inputData = cleanInput.getReadPointer(channel);
